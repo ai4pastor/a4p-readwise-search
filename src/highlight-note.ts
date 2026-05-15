@@ -89,7 +89,6 @@ async function resolvePath(
 
 function buildContent(n: NormalizedHighlight): string {
   const fmLines: string[] = ["---"];
-  fmLines.push(`source: ${yamlString(n.bookTitle)}`);
   if (n.author) fmLines.push(`author: ${yamlString(n.author)}`);
   if (n.category) fmLines.push(`category: ${n.category}`);
   fmLines.push(`highlight_id: ${n.highlightId}`);
