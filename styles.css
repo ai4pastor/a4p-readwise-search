@@ -1,1 +1,113 @@
-/* a4p-readwise-search styles — PR1: empty starter */
+.a4p-rw-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 8px 10px;
+  gap: 8px;
+}
+
+.a4p-rw-header h3 {
+  margin: 0 0 6px 0;
+}
+
+.a4p-rw-search-input {
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: var(--font-ui-medium);
+}
+
+.a4p-rw-status {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  padding: 2px 2px;
+}
+
+.a4p-rw-results {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 12px;
+}
+
+.a4p-rw-card {
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.a4p-rw-meta {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.a4p-rw-title {
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.a4p-rw-author {
+  color: var(--text-muted);
+}
+
+.a4p-rw-body {
+  font-size: var(--font-ui-medium);
+  line-height: 1.5;
+  color: var(--text-normal);
+  white-space: pre-wrap;
+}
+
+.a4p-rw-note {
+  font-size: var(--font-ui-smaller);
+  background: var(--background-primary-alt);
+  border-left: 3px solid var(--interactive-accent);
+  padding: 4px 8px;
+  color: var(--text-muted);
+  font-style: italic;
+  white-space: pre-wrap;
+}
+
+.a4p-rw-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.a4p-rw-tag {
+  font-size: var(--font-ui-smaller);
+  background: var(--background-modifier-hover);
+  color: var(--text-muted);
+  padding: 1px 6px;
+  border-radius: 10px;
+}
+
+.a4p-rw-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.a4p-rw-insert {
+  cursor: pointer;
+}
+
+.a4p-rw-link {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  text-decoration: underline;
+}
+
+.a4p-rw-empty {
+  padding: 12px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
