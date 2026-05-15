@@ -32,9 +32,19 @@ export class ReadwiseSearchSettingTab extends PluginSettingTab {
 
     containerEl.createEl("h2", { text: "Readwise Search" });
 
+    const tokenDesc = document.createDocumentFragment();
+    tokenDesc.appendText("토큰이 없다면 ");
+    const tokenLink = tokenDesc.createEl("a", {
+      text: "readwise.io/access_token",
+      href: "https://readwise.io/access_token",
+    });
+    tokenLink.setAttr("target", "_blank");
+    tokenLink.setAttr("rel", "noopener");
+    tokenDesc.appendText(" 에서 발급받아 아래에 붙여넣으세요.");
+
     new Setting(containerEl)
       .setName("Readwise API 토큰")
-      .setDesc("토큰이 없다면 아래 '토큰 발급' 버튼을 눌러 Readwise에서 발급받으세요.")
+      .setDesc(tokenDesc)
       .addText((text) =>
         text
           .setPlaceholder("Token...")
