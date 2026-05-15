@@ -32,3 +32,9 @@ export interface ReadwiseBook {
   book_tags: ReadwiseTag[];
   highlights: ReadwiseHighlight[];
 }
+
+export interface CachedData {
+  books: ReadwiseBook[];
+}
+
+export const EMPTY_CACHE: CachedData = { books: [] };
