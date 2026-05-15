@@ -89,9 +89,9 @@
   height: 14px;
 }
 
-.a4p-rw-search-input {
+.a4p-rw-input-wrap input.a4p-rw-search-input {
   width: 100%;
-  padding: 7px 32px 7px 32px;
+  padding: 7px 36px 7px 36px;
   border-radius: 8px;
   border: 1px solid var(--background-modifier-border);
   background: var(--background-primary);
