@@ -18,7 +18,7 @@ interface NormalizedHighlight {
 function fromHit(hit: SearchHit): NormalizedHighlight {
   return {
     highlightId: hit.highlight.id,
-    bookTitle: hit.book.title || "Untitled",
+    bookTitle: hit.book.title || "제목 없음",
     author: hit.book.author,
     category: hit.book.category,
     text: hit.highlight.text ?? "",
@@ -35,7 +35,7 @@ function fromHit(hit: SearchHit): NormalizedHighlight {
 function fromDaily(dh: DailyReviewHighlight): NormalizedHighlight {
   return {
     highlightId: dh.id,
-    bookTitle: dh.title || "Untitled",
+    bookTitle: dh.title || "제목 없음",
     author: dh.author,
     category: dh.category ?? null,
     text: dh.text ?? "",

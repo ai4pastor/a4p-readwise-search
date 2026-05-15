@@ -11,7 +11,7 @@ interface CalloutInput {
 }
 
 function buildCallout(input: CalloutInput): string {
-  const title = input.title.trim() || "Untitled";
+  const title = input.title.trim() || "제목 없음";
   const author = input.author?.trim();
   const text = (input.text ?? "").trim();
   const note = (input.note ?? "").trim();

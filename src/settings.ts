@@ -34,7 +34,7 @@ export class ReadwiseSearchSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Readwise API 토큰")
-      .setDesc("https://readwise.io/access_token 에서 발급받은 토큰을 입력하세요.")
+      .setDesc("토큰이 없다면 아래 '토큰 발급' 버튼을 눌러 Readwise에서 발급받으세요.")
       .addText((text) =>
         text
           .setPlaceholder("Token...")
@@ -42,6 +42,13 @@ export class ReadwiseSearchSettingTab extends PluginSettingTab {
           .onChange(async (value) => {
             this.plugin.settings.apiToken = value.trim();
             await this.plugin.persist();
+          }),
+      )
+      .addButton((btn) =>
+        btn
+          .setButtonText("토큰 발급")
+          .onClick(() => {
+            window.open("https://readwise.io/access_token", "_blank");
           }),
       )
       .addButton((btn) =>

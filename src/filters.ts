@@ -25,7 +25,7 @@ export interface ActiveFilters {
 export function collectFilterOptions(books: ReadwiseBook[]): FilterOptions {
   const bookOpts: BookOption[] = books.map((b) => ({
     id: b.user_book_id,
-    label: b.author ? `${b.title} — ${b.author}` : b.title || "Untitled",
+    label: b.author ? `${b.title} — ${b.author}` : b.title || "제목 없음",
   }));
   bookOpts.sort((a, b) => a.label.localeCompare(b.label, "ko"));
 
