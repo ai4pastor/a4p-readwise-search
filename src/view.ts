@@ -1,15 +1,28 @@
-import { ItemView, WorkspaceLeaf } from "obsidian";
-import type ReadwiseSearchPlugin from "./main";
-import { insertCitation } from "./citation";
+import { ItemView, Notice, WorkspaceLeaf } from "obsidian";
+import {
+  ReadwiseApiError,
+  ReadwiseAuthError,
+  ReadwiseClient,
+  ReadwiseRateLimitError,
+} from "./api";
+import {
+  insertCitation,
+  insertDailyCitation,
+  insertDailyCitations,
+} from "./citation";
 import {
   ActiveFilters,
   collectFilterOptions,
   FilterOptions,
   hasActiveFilters,
 } from "./filters";
+import type ReadwiseSearchPlugin from "./main";
 import { searchHighlights, SearchHit } from "./search";
+import { DailyReview, DailyReviewHighlight } from "./types";
 
 export const VIEW_TYPE_READWISE_SEARCH = "a4p-readwise-search-view";
+
+export type ReadwiseTab = "search" | "daily";
 
 const DEBOUNCE_MS = 150;
 const SNIPPET_MAX = 280;
@@ -17,10 +30,15 @@ const TAG_VISIBLE_LIMIT = 20;
 
 export class ReadwiseSearchView extends ItemView {
   private plugin: ReadwiseSearchPlugin;
-  private inputEl!: HTMLInputElement;
-  private filtersEl!: HTMLDivElement;
-  private resultsEl!: HTMLDivElement;
-  private statusEl!: HTMLDivElement;
+  private tabsEl!: HTMLDivElement;
+  private bodyEl!: HTMLDivElement;
+  private activeTab: ReadwiseTab = "search";
+
+  // Search tab state
+  private inputEl: HTMLInputElement | null = null;
+  private filtersEl: HTMLDivElement | null = null;
+  private searchStatusEl: HTMLDivElement | null = null;
+  private searchResultsEl: HTMLDivElement | null = null;
   private debounceTimer: number | null = null;
   private currentQuery = "";
   private filters: ActiveFilters = {
@@ -30,6 +48,14 @@ export class ReadwiseSearchView extends ItemView {
   };
   private options: FilterOptions = { books: [], tags: [], categories: [] };
   private tagsExpanded = false;
+
+  // Daily tab state
+  private dailyStatusEl: HTMLDivElement | null = null;
+  private dailyActionsEl: HTMLDivElement | null = null;
+  private dailyResultsEl: HTMLDivElement | null = null;
+  private dailyReview: DailyReview | null = null;
+  private dailyLoading = false;
+  private dailyFetched = false;
 
   constructor(leaf: WorkspaceLeaf, plugin: ReadwiseSearchPlugin) {
     super(leaf);
@@ -53,26 +79,66 @@ export class ReadwiseSearchView extends ItemView {
     root.empty();
     root.addClass("a4p-rw-panel");
 
-    const header = root.createDiv({ cls: "a4p-rw-header" });
-    header.createEl("h3", { text: "Readwise Search" });
+    this.tabsEl = root.createDiv({ cls: "a4p-rw-tabs" });
+    this.bodyEl = root.createDiv({ cls: "a4p-rw-body-area" });
 
-    this.inputEl = header.createEl("input", {
-      cls: "a4p-rw-search-input",
-      attr: { type: "search", placeholder: "highlights 검색..." },
-    });
-    this.inputEl.addEventListener("input", () => this.scheduleSearch());
-
-    this.filtersEl = root.createDiv({ cls: "a4p-rw-filters" });
-    this.statusEl = root.createDiv({ cls: "a4p-rw-status" });
-    this.resultsEl = root.createDiv({ cls: "a4p-rw-results" });
-
-    this.rebuildFilterOptions();
-    this.renderFilters();
-    this.runSearch();
+    this.renderTabs();
+    this.renderActiveTab();
   }
 
   async onClose() {
     if (this.debounceTimer !== null) window.clearTimeout(this.debounceTimer);
+  }
+
+  setTab(tab: ReadwiseTab) {
+    if (this.activeTab === tab) {
+      if (tab === "daily" && !this.dailyFetched) void this.fetchDaily();
+      return;
+    }
+    this.activeTab = tab;
+    this.renderTabs();
+    this.renderActiveTab();
+  }
+
+  private renderTabs() {
+    this.tabsEl.empty();
+    const tabs: { key: ReadwiseTab; label: string }[] = [
+      { key: "search", label: "검색" },
+      { key: "daily", label: "Daily Review" },
+    ];
+    for (const t of tabs) {
+      const el = this.tabsEl.createDiv({ cls: "a4p-rw-tab", text: t.label });
+      if (t.key === this.activeTab) el.addClass("is-active");
+      el.addEventListener("click", () => this.setTab(t.key));
+    }
+  }
+
+  private renderActiveTab() {
+    this.bodyEl.empty();
+    if (this.activeTab === "search") this.renderSearchTab();
+    else this.renderDailyTab();
+  }
+
+  // ───────── Search tab ─────────
+
+  private renderSearchTab() {
+    const root = this.bodyEl;
+
+    const header = root.createDiv({ cls: "a4p-rw-header" });
+    this.inputEl = header.createEl("input", {
+      cls: "a4p-rw-search-input",
+      attr: { type: "search", placeholder: "highlights 검색..." },
+    });
+    this.inputEl.value = this.currentQuery;
+    this.inputEl.addEventListener("input", () => this.scheduleSearch());
+
+    this.filtersEl = root.createDiv({ cls: "a4p-rw-filters" });
+    this.searchStatusEl = root.createDiv({ cls: "a4p-rw-status" });
+    this.searchResultsEl = root.createDiv({ cls: "a4p-rw-results" });
+
+    this.rebuildFilterOptions();
+    this.renderFilters();
+    this.runSearch();
   }
 
   private rebuildFilterOptions() {
@@ -80,14 +146,16 @@ export class ReadwiseSearchView extends ItemView {
   }
 
   private scheduleSearch() {
+    if (!this.inputEl) return;
     if (this.debounceTimer !== null) window.clearTimeout(this.debounceTimer);
     this.debounceTimer = window.setTimeout(() => {
-      this.currentQuery = this.inputEl.value;
+      this.currentQuery = this.inputEl?.value ?? "";
       this.runSearch();
     }, DEBOUNCE_MS);
   }
 
   private renderFilters() {
+    if (!this.filtersEl) return;
     const el = this.filtersEl;
     el.empty();
 
@@ -181,10 +249,11 @@ export class ReadwiseSearchView extends ItemView {
   }
 
   private runSearch() {
+    if (!this.searchStatusEl || !this.searchResultsEl) return;
     const books = this.plugin.cache.books;
 
     if (books.length === 0) {
-      this.renderEmpty();
+      this.renderSearchEmpty();
       return;
     }
 
@@ -192,10 +261,10 @@ export class ReadwiseSearchView extends ItemView {
     const filtersActive = hasActiveFilters(this.filters);
 
     if (!query && !filtersActive) {
-      this.statusEl.setText(
+      this.searchStatusEl.setText(
         `캐시: ${this.plugin.settings.bookCount}권 · ${this.plugin.settings.highlightCount}건. 검색어 또는 필터를 선택하세요.`,
       );
-      this.resultsEl.empty();
+      this.searchResultsEl.empty();
       return;
     }
 
@@ -203,8 +272,8 @@ export class ReadwiseSearchView extends ItemView {
     const filterSummary = this.summarizeFilters();
     const base =
       hits.length === 0 ? "결과 없음" : `${hits.length}건 (상위 100건까지)`;
-    this.statusEl.setText(filterSummary ? `${base} · ${filterSummary}` : base);
-    this.renderResults(hits);
+    this.searchStatusEl.setText(filterSummary ? `${base} · ${filterSummary}` : base);
+    this.renderSearchResults(hits);
   }
 
   private summarizeFilters(): string {
@@ -223,23 +292,26 @@ export class ReadwiseSearchView extends ItemView {
     return parts.join(" · ");
   }
 
-  private renderEmpty() {
-    this.resultsEl.empty();
-    this.statusEl.setText("");
-    const empty = this.resultsEl.createDiv({ cls: "a4p-rw-empty" });
+  private renderSearchEmpty() {
+    if (!this.searchResultsEl || !this.searchStatusEl) return;
+    this.searchResultsEl.empty();
+    this.searchStatusEl.setText("");
+    const empty = this.searchResultsEl.createDiv({ cls: "a4p-rw-empty" });
     empty.createEl("p", { text: "아직 동기화된 데이터가 없습니다." });
     empty.createEl("p", {
       text: "설정 → Readwise Search 에서 토큰 입력 후 '전체 동기화'를 실행해주세요.",
     });
   }
 
-  private renderResults(hits: SearchHit[]) {
-    this.resultsEl.empty();
-    for (const hit of hits) this.renderCard(hit);
+  private renderSearchResults(hits: SearchHit[]) {
+    if (!this.searchResultsEl) return;
+    this.searchResultsEl.empty();
+    for (const hit of hits) this.renderSearchCard(hit);
   }
 
-  private renderCard(hit: SearchHit) {
-    const card = this.resultsEl.createDiv({ cls: "a4p-rw-card" });
+  private renderSearchCard(hit: SearchHit) {
+    if (!this.searchResultsEl) return;
+    const card = this.searchResultsEl.createDiv({ cls: "a4p-rw-card" });
 
     const meta = card.createDiv({ cls: "a4p-rw-meta" });
     const titleText = hit.book.title || "Untitled";
@@ -252,10 +324,7 @@ export class ReadwiseSearchView extends ItemView {
     body.setText(text.length > SNIPPET_MAX ? text.slice(0, SNIPPET_MAX) + "…" : text);
 
     const note = (hit.highlight.note ?? "").trim();
-    if (note) {
-      const noteEl = card.createDiv({ cls: "a4p-rw-note" });
-      noteEl.setText(note);
-    }
+    if (note) card.createDiv({ cls: "a4p-rw-note" }).setText(note);
 
     const tags = [
       ...(hit.highlight.tags ?? []),
@@ -291,8 +360,153 @@ export class ReadwiseSearchView extends ItemView {
 
   refreshAfterSync() {
     this.rebuildFilterOptions();
-    this.renderFilters();
-    this.runSearch();
+    if (this.activeTab === "search") {
+      this.renderFilters();
+      this.runSearch();
+    }
+  }
+
+  // ───────── Daily tab ─────────
+
+  private renderDailyTab() {
+    const root = this.bodyEl;
+    const header = root.createDiv({ cls: "a4p-rw-header" });
+    header.createEl("h3", { text: "Daily Review" });
+
+    this.dailyActionsEl = root.createDiv({ cls: "a4p-rw-daily-actions" });
+    this.dailyStatusEl = root.createDiv({ cls: "a4p-rw-status" });
+    this.dailyResultsEl = root.createDiv({ cls: "a4p-rw-results" });
+
+    this.renderDailyActions();
+
+    if (this.dailyReview) {
+      this.dailyStatusEl.setText(
+        `${this.dailyReview.highlights.length}개 항목${this.dailyReview.review_completed ? " · 오늘 review 완료됨" : ""}`,
+      );
+      this.renderDailyHighlights(this.dailyReview.highlights);
+    } else if (!this.dailyFetched) {
+      void this.fetchDaily();
+    }
+  }
+
+  private renderDailyActions() {
+    if (!this.dailyActionsEl) return;
+    const el = this.dailyActionsEl;
+    el.empty();
+
+    const refreshBtn = el.createEl("button", {
+      cls: "a4p-rw-daily-btn",
+      text: "새로고침",
+    });
+    refreshBtn.addEventListener("click", () => void this.fetchDaily());
+
+    const insertAllBtn = el.createEl("button", {
+      cls: "a4p-rw-daily-btn",
+      text: "오늘 review 전체 인용 삽입",
+    });
+    insertAllBtn.addEventListener("click", () => {
+      if (!this.dailyReview || this.dailyReview.highlights.length === 0) {
+        new Notice("삽입할 항목이 없습니다.");
+        return;
+      }
+      const ok = insertDailyCitations(this.app, this.dailyReview.highlights);
+      if (ok) new Notice(`${this.dailyReview.highlights.length}개 인용 삽입 완료`);
+    });
+
+    if (this.dailyReview?.review_url) {
+      const link = el.createEl("a", {
+        text: "Readwise에서 열기",
+        href: this.dailyReview.review_url,
+        cls: "a4p-rw-link",
+      });
+      link.setAttr("target", "_blank");
+      link.setAttr("rel", "noopener");
+    }
+  }
+
+  private async fetchDaily() {
+    if (this.dailyLoading) return;
+    if (!this.dailyStatusEl || !this.dailyResultsEl) return;
+
+    if (!this.plugin.settings.apiToken) {
+      this.dailyStatusEl.setText("설정에서 Readwise 토큰을 먼저 입력해주세요.");
+      this.dailyResultsEl.empty();
+      this.dailyFetched = true;
+      return;
+    }
+
+    this.dailyLoading = true;
+    this.dailyStatusEl.setText("Daily Review 가져오는 중...");
+    this.dailyResultsEl.empty();
+
+    try {
+      const client = new ReadwiseClient(this.plugin.settings.apiToken);
+      const review = await client.getDailyReview();
+      this.dailyReview = review;
+      this.dailyStatusEl.setText(
+        `${review.highlights.length}개 항목${review.review_completed ? " · 오늘 review 완료됨" : ""}`,
+      );
+      this.renderDailyActions();
+      this.renderDailyHighlights(review.highlights);
+    } catch (e) {
+      this.dailyReview = null;
+      this.dailyStatusEl.setText(this.formatDailyError(e));
+      this.renderDailyActions();
+    } finally {
+      this.dailyLoading = false;
+      this.dailyFetched = true;
+    }
+  }
+
+  private formatDailyError(e: unknown): string {
+    if (e instanceof ReadwiseAuthError) return `인증 실패: ${e.message}`;
+    if (e instanceof ReadwiseRateLimitError)
+      return `Rate limit. ${e.retryAfterSec}초 후 다시 시도해주세요.`;
+    if (e instanceof ReadwiseApiError) return `API 오류: ${e.message}`;
+    if (e instanceof Error) return `오류: ${e.message}`;
+    return "알 수 없는 오류";
+  }
+
+  private renderDailyHighlights(items: DailyReviewHighlight[]) {
+    if (!this.dailyResultsEl) return;
+    this.dailyResultsEl.empty();
+    if (items.length === 0) {
+      const empty = this.dailyResultsEl.createDiv({ cls: "a4p-rw-empty" });
+      empty.createEl("p", { text: "오늘의 Daily Review 항목이 없습니다." });
+      return;
+    }
+    for (const dh of items) this.renderDailyCard(dh);
+  }
+
+  private renderDailyCard(dh: DailyReviewHighlight) {
+    if (!this.dailyResultsEl) return;
+    const card = this.dailyResultsEl.createDiv({ cls: "a4p-rw-card" });
+
+    const meta = card.createDiv({ cls: "a4p-rw-meta" });
+    meta.createSpan({ cls: "a4p-rw-title", text: dh.title || "Untitled" });
+    if (dh.author) meta.createSpan({ cls: "a4p-rw-author", text: ` — ${dh.author}` });
+
+    const body = card.createDiv({ cls: "a4p-rw-body" });
+    const text = dh.text ?? "";
+    body.setText(text.length > SNIPPET_MAX ? text.slice(0, SNIPPET_MAX) + "…" : text);
+
+    const note = (dh.note ?? "").trim();
+    if (note) card.createDiv({ cls: "a4p-rw-note" }).setText(note);
+
+    const actions = card.createDiv({ cls: "a4p-rw-actions" });
+    const insertBtn = actions.createEl("button", {
+      cls: "a4p-rw-insert",
+      text: "노트에 인용 삽입",
+    });
+    insertBtn.addEventListener("click", () => insertDailyCitation(this.app, dh));
+
+    const url = dh.highlight_url || dh.source_url || dh.url;
+    if (url) {
+      const link = actions.createEl("a", { text: "Readwise/원문", href: url });
+      link.setAttr("target", "_blank");
+      link.setAttr("rel", "noopener");
+      link.addClass("a4p-rw-link");
+    }
   }
 }
 

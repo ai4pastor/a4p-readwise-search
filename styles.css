@@ -6,6 +6,40 @@
   gap: 8px;
 }
 
+.a4p-rw-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.a4p-rw-tab {
+  padding: 6px 12px;
+  font-size: var(--font-ui-medium);
+  color: var(--text-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  user-select: none;
+}
+
+.a4p-rw-tab:hover {
+  color: var(--text-normal);
+}
+
+.a4p-rw-tab.is-active {
+  color: var(--text-normal);
+  border-bottom-color: var(--interactive-accent);
+  font-weight: 600;
+}
+
+.a4p-rw-body-area {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+}
+
 .a4p-rw-header h3 {
   margin: 0 0 6px 0;
 }
