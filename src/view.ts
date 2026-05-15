@@ -381,6 +381,7 @@ export class ReadwiseSearchView extends ItemView {
     const titleEl = meta.createSpan({ cls: "a4p-rw-title" });
     renderTextWithMarks(titleEl, titleText, terms);
     if (author) meta.createSpan({ cls: "a4p-rw-author", text: ` — ${author}` });
+    renderCategoryChip(meta, hit.book.category);
     const when = formatRelative(hit.highlight.updated || hit.highlight.highlighted_at);
     if (when) {
       meta.createSpan({ cls: "a4p-rw-time", text: when }).setAttr(
@@ -570,6 +571,7 @@ export class ReadwiseSearchView extends ItemView {
     const meta = card.createDiv({ cls: "a4p-rw-meta" });
     meta.createSpan({ cls: "a4p-rw-title", text: dh.title || "Untitled" });
     if (dh.author) meta.createSpan({ cls: "a4p-rw-author", text: ` — ${dh.author}` });
+    renderCategoryChip(meta, dh.category);
     const when = formatRelative(dh.highlighted_at);
     if (when) {
       meta.createSpan({ cls: "a4p-rw-time", text: when }).setAttr(
@@ -632,6 +634,22 @@ export class ReadwiseSearchView extends ItemView {
 
 function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n) + "…" : s;
+}
+
+function renderCategoryChip(el: HTMLElement, category: string | null | undefined) {
+  if (!category) return;
+  const labels: Record<string, string> = {
+    books: "책",
+    articles: "아티클",
+    tweets: "트윗",
+    podcasts: "팟캐스트",
+    supplementals: "보조",
+  };
+  const label = labels[category] ?? category;
+  el.createSpan({
+    cls: `a4p-rw-category-chip is-${category}`,
+    text: label,
+  });
 }
 
 function formatRelative(iso: string | null | undefined): string {

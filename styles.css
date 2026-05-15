@@ -362,6 +362,47 @@
   flex: 0 0 auto;
 }
 
+.a4p-rw-category-chip {
+  font-size: var(--font-ui-smaller);
+  padding: 1px 7px;
+  border-radius: 10px;
+  margin-left: 6px;
+  flex: 0 0 auto;
+  font-weight: 500;
+  line-height: 1.4;
+  border: 1px solid transparent;
+}
+
+.a4p-rw-category-chip.is-books {
+  background: rgba(64, 132, 240, 0.15);
+  color: var(--color-blue, #4084f0);
+  border-color: rgba(64, 132, 240, 0.3);
+}
+
+.a4p-rw-category-chip.is-articles {
+  background: rgba(232, 138, 64, 0.15);
+  color: var(--color-orange, #e88a40);
+  border-color: rgba(232, 138, 64, 0.3);
+}
+
+.a4p-rw-category-chip.is-tweets {
+  background: rgba(32, 178, 170, 0.15);
+  color: var(--color-cyan, #20b2aa);
+  border-color: rgba(32, 178, 170, 0.3);
+}
+
+.a4p-rw-category-chip.is-podcasts {
+  background: rgba(155, 89, 182, 0.15);
+  color: var(--color-purple, #9b59b6);
+  border-color: rgba(155, 89, 182, 0.3);
+}
+
+.a4p-rw-category-chip.is-supplementals {
+  background: rgba(99, 142, 99, 0.15);
+  color: var(--color-green, #638e63);
+  border-color: rgba(99, 142, 99, 0.3);
+}
+
 .a4p-rw-body {
   font-size: var(--font-ui-medium);
   line-height: 1.55;
