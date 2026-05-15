@@ -38,3 +38,28 @@ export interface CachedData {
 }
 
 export const EMPTY_CACHE: CachedData = { books: [] };
+
+export interface DailyReviewHighlight {
+  id: number;
+  text: string;
+  title: string;
+  author: string | null;
+  url: string | null;
+  source_url: string | null;
+  source_type: string;
+  category: string;
+  location_type: string;
+  location: number | null;
+  note: string;
+  highlighted_at: string | null;
+  highlight_url: string | null;
+  image_url: string | null;
+  api_source: string | null;
+}
+
+export interface DailyReview {
+  review_id: number;
+  review_url: string;
+  review_completed: boolean;
+  highlights: DailyReviewHighlight[];
+}

@@ -1,4 +1,5 @@
 import { Plugin, WorkspaceLeaf } from "obsidian";
+import { ReadwiseDailyView, VIEW_TYPE_READWISE_DAILY } from "./daily-view";
 import {
   DEFAULT_SETTINGS,
   ReadwiseSearchSettings,
@@ -28,16 +29,31 @@ export default class ReadwiseSearchPlugin extends Plugin {
       VIEW_TYPE_READWISE_SEARCH,
       (leaf) => new ReadwiseSearchView(leaf, this),
     );
+    this.registerView(
+      VIEW_TYPE_READWISE_DAILY,
+      (leaf) => new ReadwiseDailyView(leaf, this),
+    );
 
     this.addRibbonIcon("search", "Readwise Search", () => {
-      void this.activateView();
+      void this.activateView(VIEW_TYPE_READWISE_SEARCH);
+    });
+    this.addRibbonIcon("calendar-days", "Readwise Daily Review", () => {
+      void this.activateView(VIEW_TYPE_READWISE_DAILY);
     });
 
     this.addCommand({
       id: "readwise-open-search",
       name: "Readwise: 검색 패널 열기",
       callback: () => {
-        void this.activateView();
+        void this.activateView(VIEW_TYPE_READWISE_SEARCH);
+      },
+    });
+
+    this.addCommand({
+      id: "readwise-open-daily",
+      name: "Readwise: Daily Review 열기",
+      callback: () => {
+        void this.activateView(VIEW_TYPE_READWISE_DAILY);
       },
     });
 
@@ -73,13 +89,13 @@ export default class ReadwiseSearchPlugin extends Plugin {
     await this.saveData(payload);
   }
 
-  async activateView() {
+  async activateView(viewType: string) {
     const { workspace } = this.app;
-    const existing = workspace.getLeavesOfType(VIEW_TYPE_READWISE_SEARCH);
+    const existing = workspace.getLeavesOfType(viewType);
     let leaf: WorkspaceLeaf | null = existing[0] ?? null;
     if (!leaf) {
       leaf = workspace.getRightLeaf(false);
-      if (leaf) await leaf.setViewState({ type: VIEW_TYPE_READWISE_SEARCH, active: true });
+      if (leaf) await leaf.setViewState({ type: viewType, active: true });
     }
     if (leaf) workspace.revealLeaf(leaf);
   }

@@ -1,5 +1,5 @@
 import { requestUrl, RequestUrlResponse } from "obsidian";
-import { ReadwiseBook } from "./types";
+import { DailyReview, ReadwiseBook } from "./types";
 
 const BASE_URL = "https://readwise.io/api/v2";
 
@@ -81,6 +81,26 @@ export class ReadwiseClient {
     }
 
     return collected;
+  }
+
+  async getDailyReview(): Promise<DailyReview> {
+    if (!this.token) {
+      throw new ReadwiseAuthError("토큰이 설정되지 않았습니다.");
+    }
+    const res = await this.request(`${BASE_URL}/review/`, "GET");
+    if (res.status === 401) {
+      throw new ReadwiseAuthError("토큰이 올바르지 않습니다.");
+    }
+    if (res.status === 429) {
+      const retryAfter = parseInt(res.headers["retry-after"] ?? "60", 10);
+      throw new ReadwiseRateLimitError(retryAfter);
+    }
+    if (res.status < 200 || res.status >= 300) {
+      throw new ReadwiseApiError(
+        `Daily Review 가져오기 실패 (${res.status}): ${res.text?.slice(0, 200) ?? ""}`,
+      );
+    }
+    return res.json as DailyReview;
   }
 
   private async request(url: string, method: "GET"): Promise<RequestUrlResponse> {

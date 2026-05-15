@@ -85,6 +85,20 @@
   padding: 2px 4px;
 }
 
+.a4p-rw-daily-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding: 2px 0;
+}
+
+.a4p-rw-daily-btn {
+  padding: 4px 10px;
+  font-size: var(--font-ui-smaller);
+  cursor: pointer;
+}
+
 .a4p-rw-results {
   overflow-y: auto;
   display: flex;
