@@ -5,6 +5,7 @@ import {
   ReadwiseClient,
   ReadwiseRateLimitError,
 } from "./api";
+import { BookSuggestModal } from "./book-suggest-modal";
 import {
   insertCitation,
   insertDailyCitation,
@@ -166,19 +167,27 @@ export class ReadwiseSearchView extends ItemView {
 
     const row = el.createDiv({ cls: "a4p-rw-filter-row" });
 
-    const bookSel = row.createEl("select", { cls: "a4p-rw-filter-select" });
-    bookSel.createEl("option", { value: "", text: "책: (전체)" });
-    for (const b of this.options.books) {
-      bookSel.createEl("option", { value: String(b.id), text: b.label });
-    }
-    const currentBook = this.filters.bookIds && this.filters.bookIds.size > 0
-      ? Array.from(this.filters.bookIds)[0]
-      : null;
-    if (currentBook !== null) bookSel.value = String(currentBook);
-    bookSel.addEventListener("change", () => {
-      const v = bookSel.value;
-      this.filters.bookIds = v ? new Set([parseInt(v, 10)]) : new Set();
-      this.runSearch();
+    const currentBookId =
+      this.filters.bookIds && this.filters.bookIds.size > 0
+        ? Array.from(this.filters.bookIds)[0]
+        : null;
+    const currentBookLabel =
+      currentBookId !== null
+        ? this.options.books.find((b) => b.id === currentBookId)?.label ?? "..."
+        : "(전체)";
+
+    const bookBtn = row.createEl("button", { cls: "a4p-rw-filter-trigger" });
+    bookBtn.createSpan({ cls: "a4p-rw-filter-trigger-label", text: "책:" });
+    bookBtn.createSpan({
+      cls: "a4p-rw-filter-trigger-value",
+      text: truncate(currentBookLabel, 28),
+    });
+    bookBtn.addEventListener("click", () => {
+      new BookSuggestModal(this.app, this.options.books, (id) => {
+        this.filters.bookIds = id !== null ? new Set([id]) : new Set();
+        this.renderFilters();
+        this.runSearch();
+      }).open();
     });
 
     const catSel = row.createEl("select", { cls: "a4p-rw-filter-select" });
