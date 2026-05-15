@@ -44,6 +44,7 @@ export class ReadwiseSearchView extends ItemView {
   // Search tab state
   private inputEl: HTMLInputElement | null = null;
   private filtersEl: HTMLDivElement | null = null;
+  private searchBannerEl: HTMLDivElement | null = null;
   private searchStatusEl: HTMLDivElement | null = null;
   private searchResultsEl: HTMLDivElement | null = null;
   private debounceTimer: number | null = null;
@@ -144,6 +145,7 @@ export class ReadwiseSearchView extends ItemView {
     this.inputEl.addEventListener("input", () => this.scheduleSearch());
 
     this.filtersEl = root.createDiv({ cls: "a4p-rw-filters" });
+    this.searchBannerEl = root.createDiv({ cls: "a4p-rw-banner" });
     this.searchStatusEl = root.createDiv({ cls: "a4p-rw-status" });
     this.searchResultsEl = root.createDiv({ cls: "a4p-rw-results" });
 
@@ -294,16 +296,41 @@ export class ReadwiseSearchView extends ItemView {
 
     const query = this.currentQuery.trim();
     const filtersActive = hasActiveFilters(this.filters);
+    const isDefaultView = !query && !filtersActive;
     const hits = searchHighlights(books, query, this.filters, this.sortMode);
     const filterSummary = this.summarizeFilters();
+
+    this.renderBanner(isDefaultView);
+
     let base: string;
-    if (!query && !filtersActive) {
-      base = `최근 highlight ${hits.length}건 (상위 100건)`;
+    if (isDefaultView) {
+      base = `${hits.length}건 (상위 100건)`;
     } else {
       base = hits.length === 0 ? "결과 없음" : `${hits.length}건 (상위 100건까지)`;
     }
     this.searchStatusEl.setText(filterSummary ? `${base} · ${filterSummary}` : base);
     this.renderSearchResults(hits);
+  }
+
+  private renderBanner(show: boolean) {
+    if (!this.searchBannerEl) return;
+    this.searchBannerEl.empty();
+    if (!show) {
+      this.searchBannerEl.removeClass("is-visible");
+      return;
+    }
+    this.searchBannerEl.addClass("is-visible");
+    const iconEl = this.searchBannerEl.createSpan({ cls: "a4p-rw-banner-icon" });
+    setIcon(iconEl, "clock");
+    const textWrap = this.searchBannerEl.createDiv({ cls: "a4p-rw-banner-text" });
+    textWrap.createDiv({
+      cls: "a4p-rw-banner-title",
+      text: "최근 업데이트된 하이라이트",
+    });
+    textWrap.createDiv({
+      cls: "a4p-rw-banner-sub",
+      text: "검색하거나 필터를 적용하면 결과로 좁혀집니다.",
+    });
   }
 
   private summarizeFilters(): string {
