@@ -359,6 +359,13 @@ export class ReadwiseSearchView extends ItemView {
     const titleEl = meta.createSpan({ cls: "a4p-rw-title" });
     renderTextWithMarks(titleEl, titleText, terms);
     if (author) meta.createSpan({ cls: "a4p-rw-author", text: ` — ${author}` });
+    const when = formatRelative(hit.highlight.updated || hit.highlight.highlighted_at);
+    if (when) {
+      meta.createSpan({ cls: "a4p-rw-time", text: when }).setAttr(
+        "aria-label",
+        new Date(hit.highlight.updated || hit.highlight.highlighted_at || "").toLocaleString(),
+      );
+    }
 
     const body = card.createDiv({ cls: "a4p-rw-body" });
     const text = hit.highlight.text ?? "";
@@ -541,6 +548,13 @@ export class ReadwiseSearchView extends ItemView {
     const meta = card.createDiv({ cls: "a4p-rw-meta" });
     meta.createSpan({ cls: "a4p-rw-title", text: dh.title || "Untitled" });
     if (dh.author) meta.createSpan({ cls: "a4p-rw-author", text: ` — ${dh.author}` });
+    const when = formatRelative(dh.highlighted_at);
+    if (when) {
+      meta.createSpan({ cls: "a4p-rw-time", text: when }).setAttr(
+        "aria-label",
+        new Date(dh.highlighted_at || "").toLocaleString(),
+      );
+    }
 
     const body = card.createDiv({ cls: "a4p-rw-body" });
     const text = dh.text ?? "";
@@ -596,6 +610,21 @@ export class ReadwiseSearchView extends ItemView {
 
 function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n) + "…" : s;
+}
+
+function formatRelative(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const diffSec = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (diffSec < 60 * 60) return "방금 전";
+  const day = 24 * 60 * 60;
+  if (diffSec < day) return "오늘";
+  if (diffSec < 2 * day) return "어제";
+  if (diffSec < 7 * day) return `${Math.floor(diffSec / day)}일 전`;
+  if (diffSec < 30 * day) return `${Math.floor(diffSec / (7 * day))}주 전`;
+  if (diffSec < 365 * day) return `${Math.floor(diffSec / (30 * day))}달 전`;
+  return `${Math.floor(diffSec / (365 * day))}년 전`;
 }
 
 function renderTextWithMarks(el: HTMLElement, text: string, terms: string[]) {

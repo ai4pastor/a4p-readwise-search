@@ -306,6 +306,17 @@
   font-size: var(--font-ui-smaller);
 }
 
+.a4p-rw-time {
+  margin-left: auto;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  background: var(--background-modifier-hover);
+  padding: 1px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
 .a4p-rw-body {
   font-size: var(--font-ui-medium);
   line-height: 1.55;
