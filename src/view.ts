@@ -1,4 +1,4 @@
-import { ItemView, Notice, WorkspaceLeaf } from "obsidian";
+import { ItemView, Notice, setIcon, WorkspaceLeaf } from "obsidian";
 import {
   ReadwiseApiError,
   ReadwiseAuthError,
@@ -102,12 +102,15 @@ export class ReadwiseSearchView extends ItemView {
 
   private renderTabs() {
     this.tabsEl.empty();
-    const tabs: { key: ReadwiseTab; label: string }[] = [
-      { key: "search", label: "검색" },
-      { key: "daily", label: "Daily Review" },
+    const tabs: { key: ReadwiseTab; label: string; icon: string }[] = [
+      { key: "search", label: "검색", icon: "search" },
+      { key: "daily", label: "Daily Review", icon: "calendar-days" },
     ];
     for (const t of tabs) {
-      const el = this.tabsEl.createDiv({ cls: "a4p-rw-tab", text: t.label });
+      const el = this.tabsEl.createDiv({ cls: "a4p-rw-tab" });
+      const iconEl = el.createSpan({ cls: "a4p-rw-tab-icon" });
+      setIcon(iconEl, t.icon);
+      el.createSpan({ cls: "a4p-rw-tab-label", text: t.label });
       if (t.key === this.activeTab) el.addClass("is-active");
       el.addEventListener("click", () => this.setTab(t.key));
     }
