@@ -58,11 +58,33 @@ function sanitizeSegment(s: string, max = 80): string {
   return cleaned.length > max ? cleaned.slice(0, max).trim() : cleaned;
 }
 
-function buildPath(root: string, n: NormalizedHighlight): string {
-  const folder = `${root}/${sanitizeSegment(n.bookTitle, 100)}`;
-  const snippet = sanitizeSegment(n.text.split("\n")[0] ?? "", 40) || "highlight";
-  const file = `${n.highlightId} - ${snippet}.md`;
-  return normalizePath(`${folder}/${file}`);
+function buildFolder(root: string, n: NormalizedHighlight): string {
+  return normalizePath(`${root}/${sanitizeSegment(n.bookTitle, 100)}`);
+}
+
+function buildBaseName(n: NormalizedHighlight): string {
+  return sanitizeSegment(n.text.split("\n")[0] ?? "", 80) || "highlight";
+}
+
+async function resolvePath(
+  app: App,
+  folder: string,
+  baseName: string,
+  highlightId: number,
+): Promise<{ path: string; existing: TFile | null }> {
+  for (let i = 0; i < 50; i++) {
+    const suffix = i === 0 ? "" : ` (${i + 1})`;
+    const path = normalizePath(`${folder}/${baseName}${suffix}.md`);
+    const file = app.vault.getAbstractFileByPath(path);
+    if (!file) return { path, existing: null };
+    if (file instanceof TFile) {
+      const fmId = app.metadataCache.getFileCache(file)?.frontmatter?.highlight_id;
+      if (typeof fmId === "number" && fmId === highlightId) {
+        return { path, existing: file };
+      }
+    }
+  }
+  throw new Error("같은 이름의 노트가 너무 많아 새 파일명을 만들 수 없습니다.");
 }
 
 function buildContent(n: NormalizedHighlight): string {
@@ -127,24 +149,25 @@ async function createOrOpen(
   n: NormalizedHighlight,
 ): Promise<void> {
   const root = (settings.noteRootFolder || "Readwise").trim().replace(/^\/+|\/+$/g, "");
-  const path = buildPath(root, n);
+  const folder = buildFolder(root, n);
+  await ensureFolder(app, folder);
 
-  const folderPath = path.substring(0, path.lastIndexOf("/"));
-  await ensureFolder(app, folderPath);
+  const baseName = buildBaseName(n);
+  const { path, existing } = await resolvePath(app, folder, baseName, n.highlightId);
 
-  let file = app.vault.getAbstractFileByPath(path);
-  if (!file) {
-    const content = buildContent(n);
-    file = await app.vault.create(path, content);
-    new Notice("Highlight 노트 생성됨");
-  } else {
+  let file: TFile;
+  if (existing) {
+    file = existing;
     new Notice("이미 존재하는 노트를 엽니다");
+  } else {
+    const created = await app.vault.create(path, buildContent(n));
+    if (!(created instanceof TFile)) throw new Error("파일 생성 결과를 확인할 수 없습니다.");
+    file = created;
+    new Notice("Highlight 노트 생성됨");
   }
 
-  if (file instanceof TFile) {
-    const leaf = app.workspace.getLeaf(true);
-    await leaf.openFile(file);
-  }
+  const leaf = app.workspace.getLeaf(true);
+  await leaf.openFile(file);
 }
 
 export async function createHighlightNoteFromHit(
