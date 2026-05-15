@@ -14,6 +14,10 @@ import {
   insertDailyCitations,
 } from "./citation";
 import {
+  createHighlightNoteFromDaily,
+  createHighlightNoteFromHit,
+} from "./highlight-note";
+import {
   ActiveFilters,
   collectFilterOptions,
   FilterOptions,
@@ -364,6 +368,14 @@ export class ReadwiseSearchView extends ItemView {
     });
     insertBtn.addEventListener("click", () => insertCitation(this.app, hit));
 
+    const createBtn = actions.createEl("button", {
+      cls: "a4p-rw-btn",
+      text: "노트 생성",
+    });
+    createBtn.addEventListener("click", () => {
+      void createHighlightNoteFromHit(this.app, this.plugin.settings, hit);
+    });
+
     const rwUrl = `https://readwise.io/bookreview/${hit.book.user_book_id}`;
     const rwLink = actions.createEl("a", { text: "Readwise에서 보기", href: rwUrl });
     rwLink.setAttr("target", "_blank");
@@ -519,6 +531,14 @@ export class ReadwiseSearchView extends ItemView {
       text: "노트에 인용 삽입",
     });
     insertBtn.addEventListener("click", () => insertDailyCitation(this.app, dh));
+
+    const createBtn = actions.createEl("button", {
+      cls: "a4p-rw-btn",
+      text: "노트 생성",
+    });
+    createBtn.addEventListener("click", () => {
+      void createHighlightNoteFromDaily(this.app, this.plugin.settings, dh);
+    });
 
     const url = dh.highlight_url || dh.source_url || dh.url;
     if (url) {

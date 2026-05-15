@@ -7,6 +7,7 @@ export interface ReadwiseSearchSettings {
   lastSyncAt: string | null;
   bookCount: number;
   highlightCount: number;
+  noteRootFolder: string;
 }
 
 export const DEFAULT_SETTINGS: ReadwiseSearchSettings = {
@@ -14,6 +15,7 @@ export const DEFAULT_SETTINGS: ReadwiseSearchSettings = {
   lastSyncAt: null,
   bookCount: 0,
   highlightCount: 0,
+  noteRootFolder: "Readwise",
 };
 
 export class ReadwiseSearchSettingTab extends PluginSettingTab {
@@ -95,6 +97,23 @@ export class ReadwiseSearchSettingTab extends PluginSettingTab {
             await this.plugin.sync.run({ full: true });
             btn.setDisabled(false);
             this.renderStatus(status);
+          }),
+      );
+
+    containerEl.createEl("h3", { text: "Highlight 노트 생성" });
+
+    new Setting(containerEl)
+      .setName("노트 폴더")
+      .setDesc(
+        "Highlight → 전용 노트 생성 시 저장될 루트 폴더. 책별 하위 폴더가 자동 생성됩니다. 예: Readwise",
+      )
+      .addText((text) =>
+        text
+          .setPlaceholder("Readwise")
+          .setValue(this.plugin.settings.noteRootFolder)
+          .onChange(async (value) => {
+            this.plugin.settings.noteRootFolder = value.trim() || "Readwise";
+            await this.plugin.persist();
           }),
       );
   }
