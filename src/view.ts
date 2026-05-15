@@ -7,6 +7,8 @@ import {
 } from "./api";
 import { BookSuggestModal } from "./book-suggest-modal";
 import {
+  formatCallout,
+  formatDailyCallout,
   insertCitation,
   insertDailyCitation,
   insertDailyCitations,
@@ -325,6 +327,9 @@ export class ReadwiseSearchView extends ItemView {
     if (!this.searchResultsEl) return;
     const card = this.searchResultsEl.createDiv({ cls: "a4p-rw-card" });
 
+    this.attachDrag(card, () => formatCallout(hit));
+    this.addDragHandle(card);
+
     const meta = card.createDiv({ cls: "a4p-rw-meta" });
     const titleText = hit.book.title || "Untitled";
     const author = hit.book.author?.trim();
@@ -494,6 +499,9 @@ export class ReadwiseSearchView extends ItemView {
     if (!this.dailyResultsEl) return;
     const card = this.dailyResultsEl.createDiv({ cls: "a4p-rw-card" });
 
+    this.attachDrag(card, () => formatDailyCallout(dh));
+    this.addDragHandle(card);
+
     const meta = card.createDiv({ cls: "a4p-rw-meta" });
     meta.createSpan({ cls: "a4p-rw-title", text: dh.title || "Untitled" });
     if (dh.author) meta.createSpan({ cls: "a4p-rw-author", text: ` — ${dh.author}` });
@@ -519,6 +527,26 @@ export class ReadwiseSearchView extends ItemView {
       link.setAttr("rel", "noopener");
       link.addClass("a4p-rw-link");
     }
+  }
+
+  private attachDrag(card: HTMLDivElement, getMarkdown: () => string) {
+    card.draggable = true;
+    card.addEventListener("dragstart", (e) => {
+      if (!e.dataTransfer) return;
+      const md = getMarkdown();
+      e.dataTransfer.setData("text/plain", md);
+      e.dataTransfer.effectAllowed = "copy";
+      card.addClass("is-dragging");
+    });
+    card.addEventListener("dragend", () => {
+      card.removeClass("is-dragging");
+    });
+  }
+
+  private addDragHandle(card: HTMLDivElement) {
+    const handle = card.createSpan({ cls: "a4p-rw-drag-handle" });
+    setIcon(handle, "grip-vertical");
+    handle.setAttr("aria-label", "드래그하여 노트에 삽입");
   }
 }
 
