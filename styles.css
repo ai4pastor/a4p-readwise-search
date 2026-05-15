@@ -35,9 +35,10 @@
 }
 
 .a4p-rw-tab.is-active {
-  color: var(--text-normal);
+  color: var(--interactive-accent);
   font-weight: 600;
   border-bottom-color: var(--interactive-accent);
+  background: var(--background-modifier-hover);
 }
 
 .a4p-rw-tab-icon {
