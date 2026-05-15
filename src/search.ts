@@ -1,4 +1,4 @@
-import { ActiveFilters, hasActiveFilters } from "./filters";
+import { ActiveFilters } from "./filters";
 import { ReadwiseBook, ReadwiseHighlight } from "./types";
 
 export interface SearchHit {
@@ -18,9 +18,6 @@ export function searchHighlights(
   sort: SortMode = "relevance",
 ): SearchHit[] {
   const query = rawQuery.trim();
-  const filtersActive = hasActiveFilters(filters);
-
-  if (!query && !filtersActive) return [];
 
   const terms = query
     ? query.toLowerCase().split(/\s+/).filter((t) => t.length > 0)

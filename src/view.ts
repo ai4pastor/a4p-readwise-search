@@ -294,19 +294,14 @@ export class ReadwiseSearchView extends ItemView {
 
     const query = this.currentQuery.trim();
     const filtersActive = hasActiveFilters(this.filters);
-
-    if (!query && !filtersActive) {
-      this.searchStatusEl.setText(
-        `캐시: ${this.plugin.settings.bookCount}권 · ${this.plugin.settings.highlightCount}건. 검색어 또는 필터를 선택하세요.`,
-      );
-      this.searchResultsEl.empty();
-      return;
-    }
-
     const hits = searchHighlights(books, query, this.filters, this.sortMode);
     const filterSummary = this.summarizeFilters();
-    const base =
-      hits.length === 0 ? "결과 없음" : `${hits.length}건 (상위 100건까지)`;
+    let base: string;
+    if (!query && !filtersActive) {
+      base = `최근 highlight ${hits.length}건 (상위 100건)`;
+    } else {
+      base = hits.length === 0 ? "결과 없음" : `${hits.length}건 (상위 100건까지)`;
+    }
     this.searchStatusEl.setText(filterSummary ? `${base} · ${filterSummary}` : base);
     this.renderSearchResults(hits);
   }
