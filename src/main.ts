@@ -1,4 +1,5 @@
 import { Plugin, WorkspaceLeaf } from "obsidian";
+import { registerCitationTracker } from "./citation";
 import {
   DEFAULT_SETTINGS,
   ReadwiseSearchSettings,
@@ -26,6 +27,7 @@ export default class ReadwiseSearchPlugin extends Plugin {
     await this.loadState();
 
     this.sync = new SyncService(this);
+    registerCitationTracker(this);
     this.addSettingTab(new ReadwiseSearchSettingTab(this.app, this));
 
     this.registerView(

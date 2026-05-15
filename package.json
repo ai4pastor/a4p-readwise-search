@@ -1,6 +1,6 @@
 {
   "name": "a4p-readwise-search",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Search Readwise highlights inside Obsidian",
   "main": "main.js",
   "scripts": {

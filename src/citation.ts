@@ -1,6 +1,21 @@
-import { App, MarkdownView, Notice } from "obsidian";
+import { App, MarkdownView, Notice, Plugin } from "obsidian";
 import { SearchHit } from "./search";
 import { DailyReviewHighlight } from "./types";
+
+let lastMarkdownView: MarkdownView | null = null;
+
+export function registerCitationTracker(plugin: Plugin): void {
+  const app = plugin.app;
+  const seed = app.workspace.getActiveViewOfType(MarkdownView);
+  if (seed) lastMarkdownView = seed;
+  plugin.registerEvent(
+    app.workspace.on("active-leaf-change", (leaf) => {
+      if (leaf && leaf.view instanceof MarkdownView) {
+        lastMarkdownView = leaf.view;
+      }
+    }),
+  );
+}
 
 interface CalloutInput {
   title: string;
@@ -68,9 +83,15 @@ export function insertDailyCitation(app: App, dh: DailyReviewHighlight): boolean
 }
 
 function findTargetMarkdownView(app: App): MarkdownView | null {
+  const leaves = app.workspace.getLeavesOfType("markdown");
+  if (lastMarkdownView) {
+    const stillOpen = leaves.some((l) => l.view === lastMarkdownView);
+    if (stillOpen) return lastMarkdownView;
+    lastMarkdownView = null;
+  }
   const active = app.workspace.getActiveViewOfType(MarkdownView);
   if (active) return active;
-  for (const leaf of app.workspace.getLeavesOfType("markdown")) {
+  for (const leaf of leaves) {
     if (leaf.view instanceof MarkdownView) return leaf.view;
   }
   return null;
