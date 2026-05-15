@@ -67,8 +67,17 @@ export function insertDailyCitation(app: App, dh: DailyReviewHighlight): boolean
   return insertBlock(app, formatDailyCallout(dh));
 }
 
+function findTargetMarkdownView(app: App): MarkdownView | null {
+  const active = app.workspace.getActiveViewOfType(MarkdownView);
+  if (active) return active;
+  for (const leaf of app.workspace.getLeavesOfType("markdown")) {
+    if (leaf.view instanceof MarkdownView) return leaf.view;
+  }
+  return null;
+}
+
 function insertBlock(app: App, block: string): boolean {
-  const view = app.workspace.getActiveViewOfType(MarkdownView);
+  const view = findTargetMarkdownView(app);
   if (!view) {
     new Notice("인용을 삽입할 마크다운 노트를 먼저 열어주세요.");
     return false;
