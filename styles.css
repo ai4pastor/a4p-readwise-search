@@ -313,6 +313,13 @@
   white-space: pre-wrap;
 }
 
+.a4p-rw-card mark {
+  background: var(--text-highlight-bg, rgba(255, 208, 0, 0.35));
+  color: inherit;
+  padding: 0 2px;
+  border-radius: 3px;
+}
+
 .a4p-rw-note {
   font-size: var(--font-ui-smaller);
   background: var(--background-primary-alt);

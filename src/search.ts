@@ -7,12 +7,15 @@ export interface SearchHit {
   score: number;
 }
 
+export type SortMode = "relevance" | "recent" | "book";
+
 const MAX_RESULTS = 100;
 
 export function searchHighlights(
   books: ReadwiseBook[],
   rawQuery: string,
   filters: ActiveFilters = {},
+  sort: SortMode = "relevance",
 ): SearchHit[] {
   const query = rawQuery.trim();
   const filtersActive = hasActiveFilters(filters);
@@ -73,10 +76,35 @@ export function searchHighlights(
     }
   }
 
-  if (terms.length > 0) {
-    hits.sort((a, b) => b.score - a.score);
-  } else {
-    hits.sort((a, b) => (b.highlight.updated ?? "").localeCompare(a.highlight.updated ?? ""));
-  }
+  applySort(hits, sort, terms.length > 0);
   return hits.slice(0, MAX_RESULTS);
+}
+
+function applySort(hits: SearchHit[], sort: SortMode, hasQuery: boolean) {
+  if (sort === "relevance" && hasQuery) {
+    hits.sort((a, b) => b.score - a.score);
+    return;
+  }
+  if (sort === "recent" || (sort === "relevance" && !hasQuery)) {
+    hits.sort((a, b) => (b.highlight.updated ?? "").localeCompare(a.highlight.updated ?? ""));
+    return;
+  }
+  if (sort === "book") {
+    hits.sort((a, b) => {
+      const t = (a.book.title ?? "").localeCompare(b.book.title ?? "", "ko");
+      if (t !== 0) return t;
+      const al = a.highlight.location ?? 0;
+      const bl = b.highlight.location ?? 0;
+      if (al !== bl) return al - bl;
+      return (b.highlight.updated ?? "").localeCompare(a.highlight.updated ?? "");
+    });
+    return;
+  }
+}
+
+export function splitQueryTerms(rawQuery: string): string[] {
+  return rawQuery
+    .trim()
+    .split(/\s+/)
+    .filter((t) => t.length > 0);
 }

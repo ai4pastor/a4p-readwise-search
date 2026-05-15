@@ -24,7 +24,7 @@ import {
   hasActiveFilters,
 } from "./filters";
 import type ReadwiseSearchPlugin from "./main";
-import { searchHighlights, SearchHit } from "./search";
+import { searchHighlights, SearchHit, SortMode, splitQueryTerms } from "./search";
 import { DailyReview, DailyReviewHighlight } from "./types";
 
 export const VIEW_TYPE_READWISE_SEARCH = "a4p-readwise-search-view";
@@ -55,6 +55,7 @@ export class ReadwiseSearchView extends ItemView {
   };
   private options: FilterOptions = { books: [], tags: [], categories: [] };
   private tagsExpanded = false;
+  private sortMode: SortMode = "relevance";
 
   // Daily tab state
   private dailyStatusEl: HTMLDivElement | null = null;
@@ -211,6 +212,21 @@ export class ReadwiseSearchView extends ItemView {
       this.runSearch();
     });
 
+    const sortSel = row.createEl("select", { cls: "a4p-rw-filter-select a4p-rw-sort-select" });
+    const sorts: { v: SortMode; label: string }[] = [
+      { v: "relevance", label: "정렬: 관련도" },
+      { v: "recent", label: "정렬: 최근" },
+      { v: "book", label: "정렬: 책별" },
+    ];
+    for (const s of sorts) {
+      sortSel.createEl("option", { value: s.v, text: s.label });
+    }
+    sortSel.value = this.sortMode;
+    sortSel.addEventListener("change", () => {
+      this.sortMode = sortSel.value as SortMode;
+      this.runSearch();
+    });
+
     const clearBtn = row.createEl("button", {
       cls: "a4p-rw-filter-clear",
       text: "초기화",
@@ -218,6 +234,7 @@ export class ReadwiseSearchView extends ItemView {
     clearBtn.addEventListener("click", () => {
       this.filters = { bookIds: new Set(), tagNames: new Set(), categories: new Set() };
       this.tagsExpanded = false;
+      this.sortMode = "relevance";
       this.renderFilters();
       this.runSearch();
     });
@@ -286,7 +303,7 @@ export class ReadwiseSearchView extends ItemView {
       return;
     }
 
-    const hits = searchHighlights(books, query, this.filters);
+    const hits = searchHighlights(books, query, this.filters, this.sortMode);
     const filterSummary = this.summarizeFilters();
     const base =
       hits.length === 0 ? "결과 없음" : `${hits.length}건 (상위 100건까지)`;
@@ -334,18 +351,25 @@ export class ReadwiseSearchView extends ItemView {
     this.attachDrag(card, () => formatCallout(hit));
     this.addDragHandle(card);
 
+    const terms = splitQueryTerms(this.currentQuery);
+
     const meta = card.createDiv({ cls: "a4p-rw-meta" });
     const titleText = hit.book.title || "Untitled";
     const author = hit.book.author?.trim();
-    meta.createSpan({ cls: "a4p-rw-title", text: titleText });
+    const titleEl = meta.createSpan({ cls: "a4p-rw-title" });
+    renderTextWithMarks(titleEl, titleText, terms);
     if (author) meta.createSpan({ cls: "a4p-rw-author", text: ` — ${author}` });
 
     const body = card.createDiv({ cls: "a4p-rw-body" });
     const text = hit.highlight.text ?? "";
-    body.setText(text.length > SNIPPET_MAX ? text.slice(0, SNIPPET_MAX) + "…" : text);
+    const truncated = text.length > SNIPPET_MAX ? text.slice(0, SNIPPET_MAX) + "…" : text;
+    renderTextWithMarks(body, truncated, terms);
 
     const note = (hit.highlight.note ?? "").trim();
-    if (note) card.createDiv({ cls: "a4p-rw-note" }).setText(note);
+    if (note) {
+      const noteEl = card.createDiv({ cls: "a4p-rw-note" });
+      renderTextWithMarks(noteEl, note, terms);
+    }
 
     const tags = [
       ...(hit.highlight.tags ?? []),
@@ -572,4 +596,42 @@ export class ReadwiseSearchView extends ItemView {
 
 function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n) + "…" : s;
+}
+
+function renderTextWithMarks(el: HTMLElement, text: string, terms: string[]) {
+  if (terms.length === 0 || !text) {
+    el.setText(text);
+    return;
+  }
+  const lower = text.toLowerCase();
+  type Range = { start: number; end: number };
+  const ranges: Range[] = [];
+  for (const t of terms) {
+    if (!t) continue;
+    let from = 0;
+    while (true) {
+      const idx = lower.indexOf(t, from);
+      if (idx === -1) break;
+      ranges.push({ start: idx, end: idx + t.length });
+      from = idx + t.length;
+    }
+  }
+  if (ranges.length === 0) {
+    el.setText(text);
+    return;
+  }
+  ranges.sort((a, b) => a.start - b.start || a.end - b.end);
+  const merged: Range[] = [];
+  for (const r of ranges) {
+    const last = merged[merged.length - 1];
+    if (last && r.start <= last.end) last.end = Math.max(last.end, r.end);
+    else merged.push({ ...r });
+  }
+  let cursor = 0;
+  for (const r of merged) {
+    if (cursor < r.start) el.appendText(text.slice(cursor, r.start));
+    el.createEl("mark", { text: text.slice(r.start, r.end) });
+    cursor = r.end;
+  }
+  if (cursor < text.length) el.appendText(text.slice(cursor));
 }
