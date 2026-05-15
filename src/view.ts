@@ -137,12 +137,30 @@ export class ReadwiseSearchView extends ItemView {
     const root = this.bodyEl;
 
     const header = root.createDiv({ cls: "a4p-rw-header" });
-    this.inputEl = header.createEl("input", {
+    const inputWrap = header.createDiv({ cls: "a4p-rw-input-wrap" });
+    const inputIcon = inputWrap.createSpan({ cls: "a4p-rw-input-icon" });
+    setIcon(inputIcon, "search");
+
+    this.inputEl = inputWrap.createEl("input", {
       cls: "a4p-rw-search-input",
       attr: { type: "search", placeholder: "highlights 검색..." },
     });
     this.inputEl.value = this.currentQuery;
-    this.inputEl.addEventListener("input", () => this.scheduleSearch());
+    this.inputEl.addEventListener("input", () => {
+      this.updateClearButton();
+      this.scheduleSearch();
+    });
+
+    const clearBtn = inputWrap.createSpan({ cls: "a4p-rw-input-clear" });
+    setIcon(clearBtn, "x");
+    clearBtn.addEventListener("click", () => {
+      if (!this.inputEl) return;
+      this.inputEl.value = "";
+      this.currentQuery = "";
+      this.updateClearButton();
+      this.runSearch();
+      this.inputEl.focus();
+    });
 
     this.filtersEl = root.createDiv({ cls: "a4p-rw-filters" });
     this.searchBannerEl = root.createDiv({ cls: "a4p-rw-banner" });
@@ -151,7 +169,15 @@ export class ReadwiseSearchView extends ItemView {
 
     this.rebuildFilterOptions();
     this.renderFilters();
+    this.updateClearButton();
     this.runSearch();
+  }
+
+  private updateClearButton() {
+    if (!this.inputEl) return;
+    const wrap = this.inputEl.closest(".a4p-rw-input-wrap");
+    if (!(wrap instanceof HTMLElement)) return;
+    wrap.toggleClass("has-value", this.inputEl.value.length > 0);
   }
 
   private rebuildFilterOptions() {
@@ -354,8 +380,14 @@ export class ReadwiseSearchView extends ItemView {
     this.searchResultsEl.empty();
     this.searchStatusEl.setText("");
     const empty = this.searchResultsEl.createDiv({ cls: "a4p-rw-empty" });
-    empty.createEl("p", { text: "아직 동기화된 데이터가 없습니다." });
+    const icon = empty.createDiv({ cls: "a4p-rw-empty-icon" });
+    setIcon(icon, "book-marked");
     empty.createEl("p", {
+      cls: "a4p-rw-empty-title",
+      text: "아직 동기화된 데이터가 없습니다",
+    });
+    empty.createEl("p", {
+      cls: "a4p-rw-empty-sub",
       text: "설정 → Readwise Search 에서 토큰 입력 후 '전체 동기화'를 실행해주세요.",
     });
   }
@@ -376,15 +408,18 @@ export class ReadwiseSearchView extends ItemView {
     const terms = splitQueryTerms(this.currentQuery);
 
     const meta = card.createDiv({ cls: "a4p-rw-meta" });
-    const titleText = hit.book.title || "Untitled";
-    const author = hit.book.author?.trim();
-    const titleEl = meta.createSpan({ cls: "a4p-rw-title" });
+    const titleRow = meta.createDiv({ cls: "a4p-rw-meta-title-row" });
+    const titleText = hit.book.title || "제목 없음";
+    const titleEl = titleRow.createSpan({ cls: "a4p-rw-title" });
     renderTextWithMarks(titleEl, titleText, terms);
-    if (author) meta.createSpan({ cls: "a4p-rw-author", text: ` — ${author}` });
-    renderCategoryChip(meta, hit.book.category);
+
+    const subRow = meta.createDiv({ cls: "a4p-rw-meta-sub-row" });
+    const author = hit.book.author?.trim();
+    if (author) subRow.createSpan({ cls: "a4p-rw-author", text: author });
+    renderCategoryChip(subRow, hit.book.category);
     const when = formatRelative(hit.highlight.updated || hit.highlight.highlighted_at);
     if (when) {
-      meta.createSpan({ cls: "a4p-rw-time", text: when }).setAttr(
+      subRow.createSpan({ cls: "a4p-rw-time", text: when }).setAttr(
         "aria-label",
         new Date(hit.highlight.updated || hit.highlight.highlighted_at || "").toLocaleString(),
       );
@@ -416,25 +451,21 @@ export class ReadwiseSearchView extends ItemView {
     }
 
     const actions = card.createDiv({ cls: "a4p-rw-actions" });
-    const insertBtn = actions.createEl("button", {
-      cls: "a4p-rw-insert",
-      text: "노트에 인용 삽입",
-    });
+    const insertBtn = makeIconButton(actions, "quote", "인용 삽입", "a4p-rw-insert");
     insertBtn.addEventListener("click", () => insertCitation(this.app, hit));
 
-    const createBtn = actions.createEl("button", {
-      cls: "a4p-rw-btn",
-      text: "노트 생성",
-    });
+    const createBtn = makeIconButton(actions, "file-plus", "노트 생성", "a4p-rw-btn");
     createBtn.addEventListener("click", () => {
       void createHighlightNoteFromHit(this.app, this.plugin.settings, hit);
     });
 
     const rwUrl = `https://readwise.io/bookreview/${hit.book.user_book_id}`;
-    const rwLink = actions.createEl("a", { text: "Readwise에서 보기", href: rwUrl });
+    const rwLink = actions.createEl("a", { href: rwUrl, cls: "a4p-rw-link" });
+    const linkIcon = rwLink.createSpan({ cls: "a4p-rw-link-icon" });
+    setIcon(linkIcon, "external-link");
+    rwLink.createSpan({ text: "Readwise" });
     rwLink.setAttr("target", "_blank");
     rwLink.setAttr("rel", "noopener");
-    rwLink.addClass("a4p-rw-link");
     rwLink.setAttr(
       "aria-label",
       "Readwise 책 페이지로 이동 (그곳에서 'Find similar highlights' 사용 가능)",
@@ -569,12 +600,15 @@ export class ReadwiseSearchView extends ItemView {
     this.addDragHandle(card);
 
     const meta = card.createDiv({ cls: "a4p-rw-meta" });
-    meta.createSpan({ cls: "a4p-rw-title", text: dh.title || "Untitled" });
-    if (dh.author) meta.createSpan({ cls: "a4p-rw-author", text: ` — ${dh.author}` });
-    renderCategoryChip(meta, dh.category);
+    const titleRow = meta.createDiv({ cls: "a4p-rw-meta-title-row" });
+    titleRow.createSpan({ cls: "a4p-rw-title", text: dh.title || "제목 없음" });
+
+    const subRow = meta.createDiv({ cls: "a4p-rw-meta-sub-row" });
+    if (dh.author) subRow.createSpan({ cls: "a4p-rw-author", text: dh.author });
+    renderCategoryChip(subRow, dh.category);
     const when = formatRelative(dh.highlighted_at);
     if (when) {
-      meta.createSpan({ cls: "a4p-rw-time", text: when }).setAttr(
+      subRow.createSpan({ cls: "a4p-rw-time", text: when }).setAttr(
         "aria-label",
         new Date(dh.highlighted_at || "").toLocaleString(),
       );
@@ -588,26 +622,22 @@ export class ReadwiseSearchView extends ItemView {
     if (note) card.createDiv({ cls: "a4p-rw-note" }).setText(note);
 
     const actions = card.createDiv({ cls: "a4p-rw-actions" });
-    const insertBtn = actions.createEl("button", {
-      cls: "a4p-rw-insert",
-      text: "노트에 인용 삽입",
-    });
+    const insertBtn = makeIconButton(actions, "quote", "인용 삽입", "a4p-rw-insert");
     insertBtn.addEventListener("click", () => insertDailyCitation(this.app, dh));
 
-    const createBtn = actions.createEl("button", {
-      cls: "a4p-rw-btn",
-      text: "노트 생성",
-    });
+    const createBtn = makeIconButton(actions, "file-plus", "노트 생성", "a4p-rw-btn");
     createBtn.addEventListener("click", () => {
       void createHighlightNoteFromDaily(this.app, this.plugin.settings, dh);
     });
 
     const url = dh.highlight_url || dh.source_url || dh.url;
     if (url) {
-      const link = actions.createEl("a", { text: "Readwise/원문", href: url });
+      const link = actions.createEl("a", { href: url, cls: "a4p-rw-link" });
+      const linkIcon = link.createSpan({ cls: "a4p-rw-link-icon" });
+      setIcon(linkIcon, "external-link");
+      link.createSpan({ text: "원문" });
       link.setAttr("target", "_blank");
       link.setAttr("rel", "noopener");
-      link.addClass("a4p-rw-link");
     }
   }
 
@@ -634,6 +664,19 @@ export class ReadwiseSearchView extends ItemView {
 
 function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n) + "…" : s;
+}
+
+function makeIconButton(
+  parent: HTMLElement,
+  icon: string,
+  label: string,
+  cls: string,
+): HTMLButtonElement {
+  const btn = parent.createEl("button", { cls });
+  const iconEl = btn.createSpan({ cls: "a4p-rw-btn-icon" });
+  setIcon(iconEl, icon);
+  btn.createSpan({ cls: "a4p-rw-btn-label", text: label });
+  return btn;
 }
 
 function renderCategoryChip(el: HTMLElement, category: string | null | undefined) {
