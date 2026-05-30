@@ -1,7 +1,7 @@
 {
   "id": "a4p-readwise-search",
   "name": "Readwise Search (a4p)",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "minAppVersion": "1.5.0",
   "description": "Readwise highlights를 옵시디언 사이드 패널에서 검색하고 노트에 인용으로 삽입합니다.",
   "author": "abadcsh",
