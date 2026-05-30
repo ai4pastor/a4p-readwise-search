@@ -7,7 +7,7 @@ export interface ReadwiseHighlight {
   highlighted_at: string | null;
   url: string | null;
   color: string;
-  updated: string;
+  updated_at: string;
   book_id: number;
   tags: ReadwiseTag[];
 }

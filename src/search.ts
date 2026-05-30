@@ -7,7 +7,7 @@ export interface SearchHit {
   score: number;
 }
 
-export type SortMode = "relevance" | "recent" | "book";
+export type SortMode = "relevance" | "recent" | "oldest" | "book";
 
 const MAX_RESULTS = 100;
 
@@ -83,7 +83,11 @@ function applySort(hits: SearchHit[], sort: SortMode, hasQuery: boolean) {
     return;
   }
   if (sort === "recent" || (sort === "relevance" && !hasQuery)) {
-    hits.sort((a, b) => (b.highlight.updated ?? "").localeCompare(a.highlight.updated ?? ""));
+    hits.sort((a, b) => (b.highlight.updated_at ?? "").localeCompare(a.highlight.updated_at ?? ""));
+    return;
+  }
+  if (sort === "oldest") {
+    hits.sort((a, b) => (a.highlight.updated_at ?? "").localeCompare(b.highlight.updated_at ?? ""));
     return;
   }
   if (sort === "book") {
@@ -93,7 +97,7 @@ function applySort(hits: SearchHit[], sort: SortMode, hasQuery: boolean) {
       const al = a.highlight.location ?? 0;
       const bl = b.highlight.location ?? 0;
       if (al !== bl) return al - bl;
-      return (b.highlight.updated ?? "").localeCompare(a.highlight.updated ?? "");
+      return (b.highlight.updated_at ?? "").localeCompare(a.highlight.updated_at ?? "");
     });
     return;
   }
