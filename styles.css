@@ -68,6 +68,62 @@
   margin: 0 0 6px 0;
 }
 
+.a4p-rw-search-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.a4p-rw-search-header .a4p-rw-input-wrap {
+  flex: 1;
+  min-width: 0;
+}
+
+.a4p-rw-sync-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 8px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.a4p-rw-sync-btn:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+  border-color: var(--interactive-accent);
+}
+
+.a4p-rw-sync-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
+.a4p-rw-sync-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.a4p-rw-sync-btn.is-syncing svg {
+  animation: a4p-rw-spin 0.9s linear infinite;
+}
+
+@keyframes a4p-rw-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .a4p-rw-input-wrap {
   position: relative;
   display: flex;

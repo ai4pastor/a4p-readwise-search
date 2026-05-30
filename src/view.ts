@@ -136,7 +136,7 @@ export class ReadwiseSearchView extends ItemView {
   private renderSearchTab() {
     const root = this.bodyEl;
 
-    const header = root.createDiv({ cls: "a4p-rw-header" });
+    const header = root.createDiv({ cls: "a4p-rw-header a4p-rw-search-header" });
     const inputWrap = header.createDiv({ cls: "a4p-rw-input-wrap" });
     const inputIcon = inputWrap.createSpan({ cls: "a4p-rw-input-icon" });
     setIcon(inputIcon, "search");
@@ -161,6 +161,11 @@ export class ReadwiseSearchView extends ItemView {
       this.runSearch();
       this.inputEl.focus();
     });
+
+    const syncBtn = header.createEl("button", { cls: "a4p-rw-sync-btn" });
+    setIcon(syncBtn, "refresh-cw");
+    syncBtn.setAttr("aria-label", "Readwise 동기화 (증분)");
+    syncBtn.addEventListener("click", () => void this.runSyncFromPanel(syncBtn));
 
     this.filtersEl = root.createDiv({ cls: "a4p-rw-filters" });
     this.searchBannerEl = root.createDiv({ cls: "a4p-rw-banner" });
@@ -243,7 +248,8 @@ export class ReadwiseSearchView extends ItemView {
     const sortSel = row.createEl("select", { cls: "a4p-rw-filter-select a4p-rw-sort-select" });
     const sorts: { v: SortMode; label: string }[] = [
       { v: "relevance", label: "정렬: 관련도" },
-      { v: "recent", label: "정렬: 최근" },
+      { v: "recent", label: "정렬: 최신순" },
+      { v: "oldest", label: "정렬: 오래된순" },
       { v: "book", label: "정렬: 책별" },
     ];
     for (const s of sorts) {
@@ -417,11 +423,11 @@ export class ReadwiseSearchView extends ItemView {
     const author = hit.book.author?.trim();
     if (author) subRow.createSpan({ cls: "a4p-rw-author", text: author });
     renderCategoryChip(subRow, hit.book.category);
-    const when = formatRelative(hit.highlight.updated || hit.highlight.highlighted_at);
+    const when = formatRelative(hit.highlight.updated_at || hit.highlight.highlighted_at);
     if (when) {
       subRow.createSpan({ cls: "a4p-rw-time", text: when }).setAttr(
         "aria-label",
-        new Date(hit.highlight.updated || hit.highlight.highlighted_at || "").toLocaleString(),
+        new Date(hit.highlight.updated_at || hit.highlight.highlighted_at || "").toLocaleString(),
       );
     }
 
@@ -470,6 +476,19 @@ export class ReadwiseSearchView extends ItemView {
       "aria-label",
       "Readwise 책 페이지로 이동 (그곳에서 'Find similar highlights' 사용 가능)",
     );
+  }
+
+  private async runSyncFromPanel(btn: HTMLButtonElement) {
+    if (this.plugin.sync.isRunning()) return;
+    btn.setAttr("disabled", "true");
+    btn.addClass("is-syncing");
+    try {
+      await this.plugin.sync.run({ full: false });
+    } finally {
+      btn.removeAttribute("disabled");
+      btn.removeClass("is-syncing");
+      this.refreshAfterSync();
+    }
   }
 
   refreshAfterSync() {

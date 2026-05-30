@@ -64,14 +64,8 @@ export default class ReadwiseSearchPlugin extends Plugin {
       },
     });
 
-    this.addCommand({
-      id: "readwise-sync-full",
-      name: "Readwise: 전체 다시 동기화",
-      callback: async () => {
-        await this.sync.run({ full: true });
-        this.notifyViews();
-      },
-    });
+    // 전체 다시 동기화는 실수 방지를 위해 커맨드 팔레트에 노출하지 않고
+    // 설정 탭의 "전체 동기화" 버튼에서만 실행한다.
   }
 
   onunload() {}
