@@ -122,7 +122,7 @@ export class ReadwiseSearchSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("노트 폴더")
       .setDesc(
-        "Highlight → 전용 노트 생성 시 저장될 루트 폴더. 책별 하위 폴더가 자동 생성됩니다. 예: Readwise",
+        "Highlight → 메모 생성 시 노트가 저장될 폴더. 하위 폴더 없이 이 폴더에 바로 들어갑니다. 예: Readwise",
       )
       .addText((text) =>
         text

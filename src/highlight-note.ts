@@ -58,10 +58,6 @@ function sanitizeSegment(s: string, max = 80): string {
   return cleaned.length > max ? cleaned.slice(0, max).trim() : cleaned;
 }
 
-function buildFolder(root: string, n: NormalizedHighlight): string {
-  return normalizePath(`${root}/${sanitizeSegment(n.bookTitle, 100)}`);
-}
-
 function buildBaseName(n: NormalizedHighlight): string {
   return sanitizeSegment(n.text.split("\n")[0] ?? "", 80) || "highlight";
 }
@@ -89,6 +85,7 @@ async function resolvePath(
 
 function buildContent(n: NormalizedHighlight): string {
   const fmLines: string[] = ["---"];
+  fmLines.push(`book: ${yamlString(n.bookTitle)}`);
   if (n.author) fmLines.push(`author: ${yamlString(n.author)}`);
   if (n.category) fmLines.push(`category: ${n.category}`);
   fmLines.push(`highlight_id: ${n.highlightId}`);
@@ -101,14 +98,17 @@ function buildContent(n: NormalizedHighlight): string {
   fmLines.push(`created_via: a4p-readwise-search`);
   fmLines.push("---");
 
+  const headline = `${n.bookTitle}${n.author ? ` — ${n.author}` : ""}`;
   const body: string[] = [];
-  body.push(`# ${n.bookTitle}${n.author ? ` — ${n.author}` : ""}`);
+  body.push(`## 내 생각`);
   body.push("");
-  body.push(n.text.trim());
+  body.push("");
+  body.push(`## 출처`);
+  body.push(`> [!quote] ${headline}`);
+  for (const line of n.text.trim().split("\n")) body.push(`> ${line}`);
   if (n.note.trim()) {
-    body.push("");
-    body.push(`> [!note] 메모`);
-    for (const line of n.note.trim().split("\n")) body.push(`> ${line}`);
+    body.push(`> `);
+    for (const line of n.note.trim().split("\n")) body.push(`> _${line}_`);
   }
   if (n.readwiseUrl || n.sourceUrl) {
     body.push("");
@@ -148,23 +148,23 @@ async function createOrOpen(
   n: NormalizedHighlight,
 ): Promise<void> {
   const root = (settings.noteRootFolder || "Readwise").trim().replace(/^\/+|\/+$/g, "");
-  const folder = buildFolder(root, n);
-  await ensureFolder(app, folder);
+  await ensureFolder(app, root);
 
   const baseName = buildBaseName(n);
-  const { path, existing } = await resolvePath(app, folder, baseName, n.highlightId);
+  const { path, existing } = await resolvePath(app, root, baseName, n.highlightId);
 
   let file: TFile;
   if (existing) {
     file = existing;
-    new Notice("이미 존재하는 노트를 엽니다");
+    new Notice("이미 존재하는 메모를 엽니다");
   } else {
     const created = await app.vault.create(path, buildContent(n));
-    if (!(created instanceof TFile)) throw new Error("파일 생성 결과를 확인할 수 없습니다.");
+    if (!(created instanceof TFile)) throw new Error("메모 생성 결과를 확인할 수 없습니다.");
     file = created;
-    new Notice("Highlight 노트 생성됨");
+    new Notice("메모 생성됨");
   }
 
+  // 새 탭에서 열어 바로 생각을 적도록
   const leaf = app.workspace.getLeaf(true);
   await leaf.openFile(file);
 }
@@ -195,5 +195,5 @@ export async function createHighlightNoteFromDaily(
 
 function handleError(e: unknown) {
   const msg = e instanceof Error ? e.message : "알 수 없는 오류";
-  new Notice(`노트 생성 실패: ${msg}`, 8000);
+  new Notice(`메모 생성 실패: ${msg}`, 8000);
 }
