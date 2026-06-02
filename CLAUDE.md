@@ -11,7 +11,7 @@
 - **로컬 캐시**: 플러그인 `data.json` 안에 settings + highlights 통합 저장
 - **데이터 흐름**: Readwise API (`/auth/`, `/export/`, `/review/`) 외 외부 통신 없음
 - **인용 형식**: `> [!quote]` callout (책 — 저자 헤드라인 + 본문 + 메모 + Readwise 링크)
-- **전용 노트 경로**: `{noteRootFolder}/{책 sanitize}/{본문 스니펫}.md` — 책별 하위 폴더
+- **메모 노트 경로**: `{noteRootFolder}/{본문 스니펫}.md` — 지정 폴더에 평평하게 저장 (`## 내 생각` + `## 출처` 인용을 담은 단일 메모)
 - **중복 처리**: 같은 highlight_id면 기존 노트 열기, 다른 highlight면 ` (2)`, ` (3)` 접미사
 - **검색**: substring AND (한국어 음절 대응) + 책/카테고리/태그 필터 + 정렬(관련도/최근/책별)
 - **기본 보기**: 검색어/필터 없으면 최근 업데이트된 highlight 자동 표시 + 배너
