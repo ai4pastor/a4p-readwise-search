@@ -35,13 +35,13 @@ export default class ReadwiseSearchPlugin extends Plugin {
       (leaf) => new ReadwiseSearchView(leaf, this),
     );
 
-    this.addRibbonIcon("search", "Readwise Search", () => {
+    this.addRibbonIcon("bookmark", "A4P Readwise Search", () => {
       void this.activateView("search");
     });
 
     this.addCommand({
       id: "readwise-open-search",
-      name: "Readwise: 검색 패널 열기",
+      name: "검색 패널 열기",
       callback: () => {
         void this.activateView("search");
       },
@@ -49,7 +49,7 @@ export default class ReadwiseSearchPlugin extends Plugin {
 
     this.addCommand({
       id: "readwise-open-daily",
-      name: "Readwise: Daily Review 열기",
+      name: "Daily Review 열기",
       callback: () => {
         void this.activateView("daily");
       },
@@ -57,7 +57,7 @@ export default class ReadwiseSearchPlugin extends Plugin {
 
     this.addCommand({
       id: "readwise-sync",
-      name: "Readwise: 동기화 (증분)",
+      name: "동기화 (증분)",
       callback: async () => {
         await this.sync.run({ full: false });
         this.notifyViews();

@@ -1,4 +1,4 @@
-# Readwise Search (a4p)
+# A4P Readwise Search
 
 옵시디언 사이드 패널에서 Readwise highlights를 검색하고, 노트에 인용으로 삽입하거나 전용 노트로 변환하는 플러그인.
 
@@ -16,14 +16,14 @@
 1. 옵시디언 커뮤니티 플러그인에서 **BRAT** 검색 → 설치 → 활성화
 2. Cmd/Ctrl+P → "BRAT: Add a beta plugin for testing" 실행
 3. 입력창에 `ai4pastor/a4p-readwise-search` 입력 → 추가
-4. 옵시디언 설정 → 커뮤니티 플러그인에서 **Readwise Search (a4p)** 활성화
+4. 옵시디언 설정 → 커뮤니티 플러그인에서 **A4P Readwise Search** 활성화
 
 ## 사용법
 
-1. 설정 → **Readwise Search**에서 "토큰 발급" 버튼 → Readwise에서 토큰 복사
+1. 설정 → **A4P Readwise Search**에서 "토큰 발급" 버튼 → Readwise에서 토큰 복사
 2. 토큰 입력 → "토큰 검증" → 성공 확인
 3. "전체 동기화" 클릭 → 모든 highlight 로컬 캐시 (이후 자동 증분)
-4. 좌측 리본의 돋보기 아이콘 또는 명령 팔레트 "Readwise: 검색 패널 열기"
+4. 좌측 리본의 책갈피(bookmark) 아이콘 또는 명령 팔레트 "A4P Readwise Search: 검색 패널 열기"
 5. 검색어 입력 → 결과 카드에서:
    - **인용 삽입** 버튼 또는 카드 드래그 → 현재 노트에 callout
    - **노트 생성** 버튼 → 노트 폴더에 `{스니펫}.md` 메모 (`## 내 생각` + `## 출처` 인용). 같은 highlight면 기존 메모를 엾니다
@@ -31,9 +31,9 @@
 
 ## 명령 팔레트
 
-- `Readwise: 검색 패널 열기`
-- `Readwise: Daily Review 열기`
-- `Readwise: 동기화 (증분)`
+- `A4P Readwise Search: 검색 패널 열기`
+- `A4P Readwise Search: Daily Review 열기`
+- `A4P Readwise Search: 동기화 (증분)`
 
 > 전체 다시 동기화는 실수 방지를 위해 명령 팔레트에 두지 않고, 설정 탭의 "전체 동기화" 버튼에서만 실행합니다.
 

@@ -30,7 +30,7 @@ export class ReadwiseSearchSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    containerEl.createEl("h2", { text: "Readwise Search" });
+    containerEl.createEl("h2", { text: "A4P Readwise Search" });
 
     const tokenDesc = document.createDocumentFragment();
     tokenDesc.appendText("토큰이 없다면 ");

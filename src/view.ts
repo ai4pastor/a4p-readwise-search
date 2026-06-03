@@ -76,11 +76,11 @@ export class ReadwiseSearchView extends ItemView {
   }
 
   getDisplayText(): string {
-    return "Readwise Search";
+    return "A4P Readwise Search";
   }
 
   getIcon(): string {
-    return "search";
+    return "bookmark";
   }
 
   async onOpen() {
@@ -394,7 +394,7 @@ export class ReadwiseSearchView extends ItemView {
     });
     empty.createEl("p", {
       cls: "a4p-rw-empty-sub",
-      text: "설정 → Readwise Search 에서 토큰 입력 후 '전체 동기화'를 실행해주세요.",
+      text: "설정 → A4P Readwise Search 에서 토큰 입력 후 '전체 동기화'를 실행해주세요.",
     });
   }
 
