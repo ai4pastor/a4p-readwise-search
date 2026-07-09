@@ -5,3 +5,6 @@ main.js
 .env
 data.json
 docs/RESUME.md
+
+# 내부 개발 문서 (공개 배포 제외)
+CLAUDE.md
