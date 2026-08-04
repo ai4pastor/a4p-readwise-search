@@ -50,14 +50,11 @@ function dedupe(arr: string[]): string[] {
   return Array.from(new Set(arr));
 }
 
-// 파일명 = "{원본 제목} — {본문 스니펫}" — 부분별 안전 상한.
+// 파일명 = 본문 첫 줄 스니펫 — 안전 상한.
 // 파일시스템·동기화 계층(macOS NFD, iCloud, Obsidian Sync)의 255바이트 한계 대비
-// 최악(제목 100 + " — " 3 + 스니펫 60 + " (50).md" 8 ≈ 171바이트)에도 여유가 크다.
-// 한글은 NFD에서 글자당 6~9바이트 → 제목 ≈ 11~16자, 스니펫 ≈ 7~10자.
-const TITLE_MAX_CHARS = 30;
-const TITLE_MAX_NFD_BYTES = 100;
-const SNIPPET_MAX_CHARS = 20;
-const SNIPPET_MAX_NFD_BYTES = 60;
+// 여유를 크게 둔 값. 한글은 NFD에서 글자당 6~9바이트라 90바이트 ≈ 한글 10~15자.
+const NAME_MAX_CHARS = 25;
+const NAME_MAX_NFD_BYTES = 90;
 
 // Obsidian/OS가 파일명에 허용하지 않거나 링크를 깨뜨리는 문자 → 유사 전각 문자
 const CHAR_MAP: Record<string, string> = {
@@ -113,14 +110,10 @@ function sanitizeSegment(s: string, maxChars: number, maxNfdBytes: number): stri
 }
 
 function buildBaseName(n: NormalizedHighlight): string {
-  const title = sanitizeSegment(n.bookTitle, TITLE_MAX_CHARS, TITLE_MAX_NFD_BYTES);
-  const snippet = sanitizeSegment(
-    n.text.split("\n")[0] ?? "",
-    SNIPPET_MAX_CHARS,
-    SNIPPET_MAX_NFD_BYTES,
+  return (
+    sanitizeSegment(n.text.split("\n")[0] ?? "", NAME_MAX_CHARS, NAME_MAX_NFD_BYTES) ||
+    "highlight"
   );
-  if (title && snippet) return `${title} — ${snippet}`;
-  return title || snippet || "highlight";
 }
 
 // 파일명 규칙과 무관하게 같은 highlight의 기존 노트를 찾는다
