@@ -50,44 +50,77 @@ function dedupe(arr: string[]): string[] {
   return Array.from(new Set(arr));
 }
 
-// 파일명 안전 상한 — 파일시스템·동기화 계층(macOS NFD, iCloud, Obsidian Sync)의
-// 255바이트 한계를 중복 접미사 " (50)" + ".md"를 더해도 넘지 않도록 여유를 둔 값.
-// 한글은 NFD에서 글자당 6~9바이트라 180바이트 ≈ 한글 20~30자.
-const MAX_NAME_CHARS = 50;
-const MAX_NAME_NFD_BYTES = 180;
+// 파일명 = "{원본 제목} — {본문 스니펫}" — 부분별 안전 상한.
+// 파일시스템·동기화 계층(macOS NFD, iCloud, Obsidian Sync)의 255바이트 한계 대비
+// 최악(제목 100 + " — " 3 + 스니펫 60 + " (50).md" 8 ≈ 171바이트)에도 여유가 크다.
+// 한글은 NFD에서 글자당 6~9바이트 → 제목 ≈ 11~16자, 스니펫 ≈ 7~10자.
+const TITLE_MAX_CHARS = 30;
+const TITLE_MAX_NFD_BYTES = 100;
+const SNIPPET_MAX_CHARS = 20;
+const SNIPPET_MAX_NFD_BYTES = 60;
+
+// Obsidian/OS가 파일명에 허용하지 않거나 링크를 깨뜨리는 문자 → 유사 전각 문자
+const CHAR_MAP: Record<string, string> = {
+  "\\": "＼",
+  "/": "／",
+  ":": "：",
+  "*": "＊",
+  "?": "？",
+  '"': "˝",
+  "<": "＜",
+  ">": "＞",
+  "|": "｜",
+  "#": "＃",
+  "^": "ˆ",
+  "[": "〔",
+  "]": "〕",
+};
 
 function nfdByteLength(s: string): number {
   return new TextEncoder().encode(s.normalize("NFD")).length;
 }
 
-function truncateFileName(s: string): string {
+function truncateFileName(s: string, maxChars: number, maxNfdBytes: number): string {
   let out = "";
   let chars = 0;
   for (const ch of s) {
-    if (chars + 1 > MAX_NAME_CHARS) break;
-    if (nfdByteLength(out + ch) > MAX_NAME_NFD_BYTES) break;
+    if (chars + 1 > maxChars) break;
+    if (nfdByteLength(out + ch) > maxNfdBytes) break;
     out += ch;
     chars++;
   }
   if (out.length < s.length) {
-    // 단어 중간에서 잘렸으면 마지막 공백까지 되돌린다 (남는 길이가 60% 이상일 때만)
-    const lastSpace = out.lastIndexOf(" ");
-    if (lastSpace >= Math.floor(out.length * 0.6)) out = out.slice(0, lastSpace);
+    // 잘렸으면 자연스러운 지점까지 되돌린다: 문장 끝(.!?…) 우선, 없으면 단어 끝(공백)
+    let sentenceEnd = -1;
+    for (const m of out.matchAll(/[.!?…]/g)) sentenceEnd = (m.index ?? -1) + 1;
+    if (sentenceEnd >= Math.floor(out.length * 0.3)) {
+      out = out.slice(0, sentenceEnd);
+    } else {
+      const lastSpace = out.lastIndexOf(" ");
+      if (lastSpace >= Math.floor(out.length * 0.5)) out = out.slice(0, lastSpace);
+    }
   }
-  // Windows는 공백·마침표로 끝나는 파일명을 허용하지 않음
-  return out.replace(/[\s.]+$/g, "");
+  // 선행 마침표는 숨김 파일 취급, 끝의 공백·마침표는 Windows에서 불가 (끝의 쉼표도 정리)
+  return out.replace(/^\.+/, "").replace(/[\s.,]+$/g, "");
 }
 
-function sanitizeSegment(s: string): string {
+function sanitizeSegment(s: string, maxChars: number, maxNfdBytes: number): string {
   const cleaned = s
-    .replace(/[\\/:*?"<>|#^[\]]/g, " ")
+    .replace(/[\\/:*?"<>|#^[\]]/g, (c) => CHAR_MAP[c] ?? " ")
     .replace(/\s+/g, " ")
     .trim();
-  return truncateFileName(cleaned);
+  return truncateFileName(cleaned, maxChars, maxNfdBytes);
 }
 
 function buildBaseName(n: NormalizedHighlight): string {
-  return sanitizeSegment(n.text.split("\n")[0] ?? "") || "highlight";
+  const title = sanitizeSegment(n.bookTitle, TITLE_MAX_CHARS, TITLE_MAX_NFD_BYTES);
+  const snippet = sanitizeSegment(
+    n.text.split("\n")[0] ?? "",
+    SNIPPET_MAX_CHARS,
+    SNIPPET_MAX_NFD_BYTES,
+  );
+  if (title && snippet) return `${title} — ${snippet}`;
+  return title || snippet || "highlight";
 }
 
 // 파일명 규칙과 무관하게 같은 highlight의 기존 노트를 찾는다
