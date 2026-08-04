@@ -50,16 +50,61 @@ function dedupe(arr: string[]): string[] {
   return Array.from(new Set(arr));
 }
 
-function sanitizeSegment(s: string, max = 80): string {
+// 파일명 안전 상한 — 파일시스템·동기화 계층(macOS NFD, iCloud, Obsidian Sync)의
+// 255바이트 한계를 중복 접미사 " (50)" + ".md"를 더해도 넘지 않도록 여유를 둔 값.
+// 한글은 NFD에서 글자당 6~9바이트라 180바이트 ≈ 한글 20~30자.
+const MAX_NAME_CHARS = 50;
+const MAX_NAME_NFD_BYTES = 180;
+
+function nfdByteLength(s: string): number {
+  return new TextEncoder().encode(s.normalize("NFD")).length;
+}
+
+function truncateFileName(s: string): string {
+  let out = "";
+  let chars = 0;
+  for (const ch of s) {
+    if (chars + 1 > MAX_NAME_CHARS) break;
+    if (nfdByteLength(out + ch) > MAX_NAME_NFD_BYTES) break;
+    out += ch;
+    chars++;
+  }
+  if (out.length < s.length) {
+    // 단어 중간에서 잘렸으면 마지막 공백까지 되돌린다 (남는 길이가 60% 이상일 때만)
+    const lastSpace = out.lastIndexOf(" ");
+    if (lastSpace >= Math.floor(out.length * 0.6)) out = out.slice(0, lastSpace);
+  }
+  // Windows는 공백·마침표로 끝나는 파일명을 허용하지 않음
+  return out.replace(/[\s.]+$/g, "");
+}
+
+function sanitizeSegment(s: string): string {
   const cleaned = s
     .replace(/[\\/:*?"<>|#^[\]]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-  return cleaned.length > max ? cleaned.slice(0, max).trim() : cleaned;
+  return truncateFileName(cleaned);
 }
 
 function buildBaseName(n: NormalizedHighlight): string {
-  return sanitizeSegment(n.text.split("\n")[0] ?? "", 80) || "highlight";
+  return sanitizeSegment(n.text.split("\n")[0] ?? "") || "highlight";
+}
+
+// 파일명 규칙과 무관하게 같은 highlight의 기존 노트를 찾는다
+// (파일명 상한이 바뀌기 전 만들어진 긴 이름의 노트도 중복 생성 없이 열기 위함)
+function findExistingByHighlightId(
+  app: App,
+  folder: string,
+  highlightId: number,
+): TFile | null {
+  const root = app.vault.getAbstractFileByPath(normalizePath(folder));
+  if (!(root instanceof TFolder)) return null;
+  for (const child of root.children) {
+    if (!(child instanceof TFile) || child.extension !== "md") continue;
+    const fmId = app.metadataCache.getFileCache(child)?.frontmatter?.highlight_id;
+    if (typeof fmId === "number" && fmId === highlightId) return child;
+  }
+  return null;
 }
 
 async function resolvePath(
@@ -68,6 +113,9 @@ async function resolvePath(
   baseName: string,
   highlightId: number,
 ): Promise<{ path: string; existing: TFile | null }> {
+  const byId = findExistingByHighlightId(app, folder, highlightId);
+  if (byId) return { path: byId.path, existing: byId };
+
   for (let i = 0; i < 50; i++) {
     const suffix = i === 0 ? "" : ` (${i + 1})`;
     const path = normalizePath(`${folder}/${baseName}${suffix}.md`);
