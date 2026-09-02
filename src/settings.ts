@@ -8,6 +8,8 @@ export interface ReadwiseSearchSettings {
   bookCount: number;
   highlightCount: number;
   noteRootFolder: string;
+  /** 결과 카드 글자 크기 (%) — 패널 CSS 변수로 반영 */
+  fontScale: number;
 }
 
 export const DEFAULT_SETTINGS: ReadwiseSearchSettings = {
@@ -16,6 +18,7 @@ export const DEFAULT_SETTINGS: ReadwiseSearchSettings = {
   bookCount: 0,
   highlightCount: 0,
   noteRootFolder: "Readwise",
+  fontScale: 90,
 };
 
 export class ReadwiseSearchSettingTab extends PluginSettingTab {
@@ -131,6 +134,23 @@ export class ReadwiseSearchSettingTab extends PluginSettingTab {
           .onChange(async (value) => {
             this.plugin.settings.noteRootFolder = value.trim() || "Readwise";
             await this.plugin.persist();
+          }),
+      );
+
+    containerEl.createEl("h3", { text: "보기" });
+
+    new Setting(containerEl)
+      .setName("결과 카드 글자 크기")
+      .setDesc("하이라이트 카드의 제목·본문 글자 크기입니다. (기본 90%)")
+      .addSlider((slider) =>
+        slider
+          .setLimits(70, 110, 5)
+          .setValue(this.plugin.settings.fontScale)
+          .setDynamicTooltip()
+          .onChange(async (value) => {
+            this.plugin.settings.fontScale = value;
+            await this.plugin.persist();
+            this.plugin.applyFontScaleToViews();
           }),
       );
   }

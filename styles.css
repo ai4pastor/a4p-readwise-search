@@ -4,6 +4,10 @@
   height: 100%;
   padding: 10px 12px;
   gap: 12px;
+  /* 결과 카드 글자 크기 — 설정 슬라이더 값으로 뷰가 덮어씀 (기본 90%) */
+  --a4p-rw-font-scale: 0.9;
+  --a4p-rw-fs-medium: calc(var(--font-ui-medium) * var(--a4p-rw-font-scale));
+  --a4p-rw-fs-smaller: calc(var(--font-ui-smaller) * var(--a4p-rw-font-scale));
 }
 
 /* ───────── Tabs ───────── */
@@ -196,57 +200,6 @@
   font-size: var(--font-ui-smaller);
   color: var(--text-muted);
   padding: 2px 2px;
-}
-
-.a4p-rw-banner {
-  display: none;
-}
-
-.a4p-rw-banner.is-visible {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 9px 12px;
-  background: var(--background-secondary);
-  border: 1px solid var(--background-modifier-border);
-  border-left: 3px solid var(--interactive-accent);
-  border-radius: 10px;
-}
-
-.a4p-rw-banner-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--interactive-accent);
-  animation: a4p-rw-pulse 2.4s ease-in-out infinite;
-}
-
-.a4p-rw-banner-icon svg {
-  width: 16px;
-  height: 16px;
-}
-
-@keyframes a4p-rw-pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.6; transform: scale(0.92); }
-}
-
-.a4p-rw-banner-text {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-}
-
-.a4p-rw-banner-title {
-  font-size: var(--font-ui-medium);
-  font-weight: 600;
-  color: var(--text-normal);
-}
-
-.a4p-rw-banner-sub {
-  font-size: var(--font-ui-smaller);
-  color: var(--text-muted);
 }
 
 .a4p-rw-filters {
@@ -495,13 +448,13 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  font-size: var(--font-ui-smaller);
+  font-size: var(--a4p-rw-fs-smaller);
   color: var(--text-muted);
 }
 
 .a4p-rw-title {
   font-weight: 600;
-  font-size: var(--font-ui-medium);
+  font-size: var(--a4p-rw-fs-medium);
   color: var(--text-accent);
   line-height: 1.35;
 }
@@ -512,7 +465,7 @@
 
 .a4p-rw-time {
   margin-left: auto;
-  font-size: var(--font-ui-smaller);
+  font-size: var(--a4p-rw-fs-smaller);
   color: var(--text-muted);
   background: var(--background-modifier-hover);
   padding: 1px 8px;
@@ -522,7 +475,7 @@
 }
 
 .a4p-rw-category-chip {
-  font-size: var(--font-ui-smaller);
+  font-size: var(--a4p-rw-fs-smaller);
   padding: 1px 8px;
   border-radius: 10px;
   flex: 0 0 auto;
@@ -562,7 +515,7 @@
 }
 
 .a4p-rw-body {
-  font-size: var(--font-ui-medium);
+  font-size: var(--a4p-rw-fs-medium);
   line-height: 1.6;
   color: var(--text-normal);
   white-space: pre-wrap;
@@ -576,7 +529,7 @@
 }
 
 .a4p-rw-note {
-  font-size: var(--font-ui-smaller);
+  font-size: var(--a4p-rw-fs-smaller);
   background: var(--background-primary-alt);
   border-left: 3px solid var(--interactive-accent);
   padding: 6px 10px;
@@ -593,7 +546,7 @@
 }
 
 .a4p-rw-tag {
-  font-size: var(--font-ui-smaller);
+  font-size: var(--a4p-rw-fs-smaller);
   background: var(--background-modifier-hover);
   color: var(--text-muted);
   padding: 1px 8px;
@@ -613,7 +566,7 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: var(--font-ui-smaller);
+  font-size: var(--a4p-rw-fs-smaller);
   color: var(--text-muted);
   text-decoration: none;
   border-bottom: 1px solid transparent;
