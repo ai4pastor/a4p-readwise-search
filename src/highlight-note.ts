@@ -1,6 +1,7 @@
 import { App, Notice, normalizePath, TFile, TFolder } from "obsidian";
 import { SearchHit } from "./search";
 import { ReadwiseSearchSettings } from "./settings";
+import { applyNoteTemplate } from "./templater";
 import { DailyReviewHighlight } from "./types";
 
 interface NormalizedHighlight {
@@ -49,6 +50,9 @@ function fromDaily(dh: DailyReviewHighlight): NormalizedHighlight {
 function dedupe(arr: string[]): string[] {
   return Array.from(new Set(arr));
 }
+
+// 분류 템플릿 실행으로 생성이 수 초 걸릴 수 있어, 같은 highlight의 재클릭으로 " (2)" 중복이 생기는 것을 막는다
+const inFlight = new Set<number>();
 
 // 파일명 = "{원본 제목} — {본문 스니펫}" — 부분별 안전 상한.
 // 노트가 지정 폴더에 평평하게 저장되므로(책별 하위폴더 없음) 파일명이
@@ -231,6 +235,23 @@ async function createOrOpen(
   settings: ReadwiseSearchSettings,
   n: NormalizedHighlight,
 ): Promise<void> {
+  if (inFlight.has(n.highlightId)) {
+    new Notice("이미 생성 중입니다");
+    return;
+  }
+  inFlight.add(n.highlightId);
+  try {
+    await createOrOpenInner(app, settings, n);
+  } finally {
+    inFlight.delete(n.highlightId);
+  }
+}
+
+async function createOrOpenInner(
+  app: App,
+  settings: ReadwiseSearchSettings,
+  n: NormalizedHighlight,
+): Promise<void> {
   const root = (settings.noteRootFolder || "Readwise").trim().replace(/^\/+|\/+$/g, "");
   await ensureFolder(app, root);
 
@@ -245,7 +266,16 @@ async function createOrOpen(
     const created = await app.vault.create(path, buildContent(n));
     if (!(created instanceof TFile)) throw new Error("메모 생성 결과를 확인할 수 없습니다.");
     file = created;
-    new Notice("메모 생성됨");
+    if (settings.noteTemplatePath) {
+      new Notice("메모 생성됨 · 분류 템플릿 적용 중… (수 초 걸릴 수 있습니다)");
+      // 분류가 끝난 뒤 열어야 입력 중인 내용이 덮어써지지 않는다 (실패해도 노트는 그대로 열림)
+      await applyNoteTemplate(app, file, settings.noteTemplatePath, {
+        readwiseTags: n.tags,
+        highlightId: n.highlightId,
+      });
+    } else {
+      new Notice("메모 생성됨");
+    }
   }
 
   // 새 탭에서 열어 바로 생각을 적도록
