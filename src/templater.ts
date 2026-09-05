@@ -84,7 +84,7 @@ const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---[ \t]*(?:\n|$)/;
 
 /** 템플릿 텍스트를 선두 프론트매터와 본문으로 나눈다. BOM 제거, CRLF → LF. */
 export function splitTemplate(raw: string): { fmText: string | null; body: string } {
-  const text = raw.replace(/^﻿/, "").replace(/\r\n?/g, "\n");
+  const text = raw.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
   const m = text.match(FRONTMATTER_RE);
   if (!m) return { fmText: null, body: text };
   return { fmText: m[1], body: text.slice(m[0].length) };
@@ -92,7 +92,7 @@ export function splitTemplate(raw: string): { fmText: string | null; body: strin
 
 /** 노트 텍스트를 프론트매터 줄들과 나머지 본문으로 나눈다. 프론트매터가 없으면 null. */
 export function splitNoteFrontmatter(raw: string): { fmLines: string[]; body: string } | null {
-  const text = raw.replace(/^﻿/, "").replace(/\r\n?/g, "\n");
+  const text = raw.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
   const m = text.match(FRONTMATTER_RE);
   if (!m) return null;
   return { fmLines: m[1].split("\n"), body: text.slice(m[0].length) };
@@ -172,7 +172,7 @@ export function stripCursorMarkers(text: string): string {
 
 /** 렌더 결과 앞에 남은 프론트매터 블록(들)을 제거 — 본문 중간에 YAML이 박히는 것 방지 */
 export function removeLeadingFrontmatterBlocks(text: string): string {
-  let out = text.replace(/^﻿/, "").replace(/\r\n?/g, "\n");
+  let out = text.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
   for (;;) {
     const m = out.match(/^\s*---\n[\s\S]*?\n---[ \t]*(?:\n|$)/);
     if (!m) break;
@@ -291,27 +291,37 @@ export async function applyNoteTemplate(
   const { fmText, body } = splitTemplate(raw);
   const source = `https://readwise.io/open/${fill.highlightId}`;
 
+  /** 렌더된 템플릿 프론트매터에서 노트에 없는 키만 덧붙인다 (멱등 — 이미 있으면 아무것도 쓰지 않음) */
+  const mergeSkeleton = async (renderedFm: string, stage: string): Promise<number> => {
+    // read → merge → modify 사이에 await를 두지 않는다 (경합 방지)
+    const note = await app.vault.read(file);
+    const split = splitNoteFrontmatter(note);
+    if (!split) {
+      console.warn(LOG, `${stage}: 노트 프론트매터를 찾지 못해 병합을 건너뜁니다`, file.path);
+      return 0;
+    }
+    const { lines, added } = mergeFrontmatter(split.fmLines, renderedFm, { source });
+    if (added.length > 0) {
+      await app.vault.modify(file, `---\n${lines.join("\n")}\n---\n${split.body}`);
+    }
+    console.debug(LOG, `${stage}: 템플릿 키 ${added.length}개 추가`, added);
+    return added.length;
+  };
+
   const work = (async () => {
+    let renderedFm: string | null = null;
+
     await withTemplaterTask(tpl, file.path, async () => {
       // Pass A — 프론트매터 스켈레톤 렌더 → 줄 단위 병합
       if (fmText !== null && fmText.trim() !== "") {
-        let rendered = "";
+        renderedFm = "";
         try {
-          rendered = await renderWithTemplater(tpl, templateFile, file, fmText);
+          renderedFm = await renderWithTemplater(tpl, templateFile, file, fmText);
         } catch (e) {
           console.error(LOG, "템플릿 프론트매터 렌더 실패 — 표현식을 비워 병합합니다", e);
         }
-        if (rendered.trim() === "") rendered = blankTemplaterTags(fmText);
-
-        // read → merge → modify 사이에 await를 두지 않는다 (경합 방지)
-        const note = await app.vault.read(file);
-        const split = splitNoteFrontmatter(note);
-        if (split) {
-          const { lines, added } = mergeFrontmatter(split.fmLines, rendered, { source });
-          if (added.length > 0) {
-            await app.vault.modify(file, `---\n${lines.join("\n")}\n---\n${split.body}`);
-          }
-        }
+        if (renderedFm.trim() === "") renderedFm = blankTemplaterTags(fmText);
+        await mergeSkeleton(renderedFm, "Pass A");
       }
 
       // Pass B — 본문 스크립트 실행 (AI 분류 → 템플릿이 processFrontMatter로 직접 기록)
@@ -321,10 +331,18 @@ export async function applyNoteTemplate(
         if (extra) {
           await app.vault.process(file, (data) => data.replace(/\n*$/, "\n\n") + extra + "\n");
         }
+        console.debug(LOG, "Pass B: 템플릿 스크립트 실행 완료", extra ? `본문 ${extra.length}자 추가` : "본문 추가 없음");
       }
     });
 
+    // 안전망 — 스크립트나 다른 플러그인의 쓰기가 Pass A 결과를 되돌렸다면 빠진 키만 다시 채운다
+    if (renderedFm !== null) {
+      const readded = await mergeSkeleton(renderedFm, "Pass A 재확인");
+      if (readded > 0) console.warn(LOG, `Pass A 병합이 유실되어 ${readded}개 키를 다시 추가했습니다`, file.path);
+    }
+
     await normalizeClassifiedFrontmatter(app, file, fill.readwiseTags, source);
+    console.debug(LOG, "분류 템플릿 적용 완료", file.path);
   })();
 
   const guarded = work.then(
