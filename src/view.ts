@@ -24,7 +24,7 @@ import {
   hasActiveFilters,
 } from "./filters";
 import type ReadwiseSearchPlugin from "./main";
-import { searchHighlights, SearchHit, SortMode, splitQueryTerms } from "./search";
+import { highlightTime, searchHighlights, SearchHit, SortMode, splitQueryTerms } from "./search";
 import { DailyReview, DailyReviewHighlight } from "./types";
 
 export const VIEW_TYPE_READWISE_SEARCH = "a4p-readwise-search-view";
@@ -55,7 +55,7 @@ export class ReadwiseSearchView extends ItemView {
   };
   private options: FilterOptions = { books: [], tags: [], categories: [] };
   private tagsExpanded = false;
-  private sortMode: SortMode = "relevance";
+  private sortMode: SortMode;
 
   // Daily tab state
   private dailyStatusEl: HTMLDivElement | null = null;
@@ -68,6 +68,7 @@ export class ReadwiseSearchView extends ItemView {
   constructor(leaf: WorkspaceLeaf, plugin: ReadwiseSearchPlugin) {
     super(leaf);
     this.plugin = plugin;
+    this.sortMode = plugin.settings.defaultSort;
   }
 
   getViewType(): string {
@@ -275,7 +276,7 @@ export class ReadwiseSearchView extends ItemView {
     clearBtn.addEventListener("click", () => {
       this.filters = { bookIds: new Set(), tagNames: new Set(), categories: new Set() };
       this.tagsExpanded = false;
-      this.sortMode = "relevance";
+      this.sortMode = this.plugin.settings.defaultSort;
       this.renderFilters();
       this.runSearch();
     });
@@ -407,11 +408,13 @@ export class ReadwiseSearchView extends ItemView {
     const author = hit.book.author?.trim();
     if (author) subRow.createSpan({ cls: "a4p-rw-author", text: author });
     renderCategoryChip(subRow, hit.book.category);
-    const when = formatRelative(hit.highlight.updated_at || hit.highlight.highlighted_at);
+    // 실제로 하이라이트한 시각 기준 (Readwise updated_at은 재업로드로 옛 항목도 갱신됨)
+    const whenIso = highlightTime(hit.highlight);
+    const when = formatRelative(whenIso);
     if (when) {
       subRow.createSpan({ cls: "a4p-rw-time", text: when }).setAttr(
         "aria-label",
-        new Date(hit.highlight.updated_at || hit.highlight.highlighted_at || "").toLocaleString(),
+        `하이라이트: ${new Date(whenIso).toLocaleString()}`,
       );
     }
 
@@ -477,6 +480,15 @@ export class ReadwiseSearchView extends ItemView {
 
   refreshAfterSync() {
     this.rebuildFilterOptions();
+    if (this.activeTab === "search") {
+      this.renderFilters();
+      this.runSearch();
+    }
+  }
+
+  /** 설정의 기본 정렬이 바뀌면 열린 패널에도 즉시 반영 */
+  applyDefaultSort() {
+    this.sortMode = this.plugin.settings.defaultSort;
     if (this.activeTab === "search") {
       this.renderFilters();
       this.runSearch();
@@ -703,9 +715,10 @@ function formatRelative(iso: string | null | undefined): string {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return "";
   const diffSec = Math.floor((Date.now() - d.getTime()) / 1000);
-  if (diffSec < 60 * 60) return "방금 전";
+  if (diffSec < 60) return "방금 전";
+  if (diffSec < 60 * 60) return `${Math.floor(diffSec / 60)}분 전`;
   const day = 24 * 60 * 60;
-  if (diffSec < day) return "오늘";
+  if (diffSec < day) return `${Math.floor(diffSec / 3600)}시간 전`;
   if (diffSec < 2 * day) return "어제";
   if (diffSec < 7 * day) return `${Math.floor(diffSec / day)}일 전`;
   if (diffSec < 30 * day) return `${Math.floor(diffSec / (7 * day))}주 전`;

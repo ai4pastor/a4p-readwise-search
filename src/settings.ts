@@ -1,6 +1,7 @@
 import { App, PluginSettingTab, Setting, Notice } from "obsidian";
 import { ReadwiseAuthError, ReadwiseClient } from "./api";
 import type ReadwiseSearchPlugin from "./main";
+import type { SortMode } from "./search";
 
 export interface ReadwiseSearchSettings {
   apiToken: string;
@@ -10,6 +11,8 @@ export interface ReadwiseSearchSettings {
   noteRootFolder: string;
   /** 결과 카드 글자 크기 (%) — 패널 CSS 변수로 반영 */
   fontScale: number;
+  /** 검색 패널을 열 때·초기화 시 적용되는 정렬 (기본 최신순) */
+  defaultSort: SortMode;
 }
 
 export const DEFAULT_SETTINGS: ReadwiseSearchSettings = {
@@ -19,6 +22,7 @@ export const DEFAULT_SETTINGS: ReadwiseSearchSettings = {
   highlightCount: 0,
   noteRootFolder: "Readwise",
   fontScale: 90,
+  defaultSort: "recent",
 };
 
 export class ReadwiseSearchSettingTab extends PluginSettingTab {
@@ -102,6 +106,7 @@ export class ReadwiseSearchSettingTab extends PluginSettingTab {
             await this.plugin.sync.run({ full: false });
             btn.setDisabled(false);
             this.renderStatus(status);
+            this.plugin.notifyViews(); // 열린 검색 패널도 새 캐시로 갱신
           }),
       );
 
@@ -117,6 +122,7 @@ export class ReadwiseSearchSettingTab extends PluginSettingTab {
             await this.plugin.sync.run({ full: true });
             btn.setDisabled(false);
             this.renderStatus(status);
+            this.plugin.notifyViews();
           }),
       );
 
@@ -138,6 +144,27 @@ export class ReadwiseSearchSettingTab extends PluginSettingTab {
       );
 
     containerEl.createEl("h3", { text: "보기" });
+
+    new Setting(containerEl)
+      .setName("기본 정렬")
+      .setDesc(
+        "검색 패널을 열 때와 '초기화'를 눌렀을 때 적용되는 정렬입니다. 최신순·오래된순은 실제로 하이라이트한 날짜 기준입니다. (기본 최신순)",
+      )
+      .addDropdown((dd) =>
+        dd
+          .addOptions({
+            recent: "최신순",
+            oldest: "오래된순",
+            relevance: "관련도",
+            book: "책별",
+          })
+          .setValue(this.plugin.settings.defaultSort)
+          .onChange(async (value) => {
+            this.plugin.settings.defaultSort = value as SortMode;
+            await this.plugin.persist();
+            this.plugin.applyDefaultSortToViews();
+          }),
+      );
 
     new Setting(containerEl)
       .setName("결과 카드 글자 크기")

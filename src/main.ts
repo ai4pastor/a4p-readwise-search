@@ -104,6 +104,13 @@ export default class ReadwiseSearchPlugin extends Plugin {
     }
   }
 
+  applyDefaultSortToViews() {
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_READWISE_SEARCH)) {
+      const view = leaf.view;
+      if (view instanceof ReadwiseSearchView) view.applyDefaultSort();
+    }
+  }
+
   applyFontScaleToViews() {
     for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_READWISE_SEARCH)) {
       const view = leaf.view;

@@ -10,6 +10,14 @@ export interface ReadwiseHighlight {
   updated_at: string;
   book_id: number;
   tags: ReadwiseTag[];
+  /** Readwise에 처음 들어온 시각 — highlighted_at이 비어 있을 때 폴백 */
+  created_at?: string | null;
+  /** Readwise 쪽에서 삭제된 하이라이트(톰스톤) — 검색에서 제외 */
+  is_deleted?: boolean;
+  is_discard?: boolean;
+  is_favorite?: boolean;
+  readwise_url?: string;
+  external_id?: string | null;
 }
 
 export interface ReadwiseTag {

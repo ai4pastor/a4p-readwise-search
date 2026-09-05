@@ -9,6 +9,16 @@ export interface SearchHit {
 
 export type SortMode = "relevance" | "recent" | "oldest" | "book";
 
+/**
+ * 카드 표시·시간순 정렬의 기준 시각.
+ * highlighted_at(실제로 하이라이트한 시각) → created_at(Readwise 유입) → updated_at 폴백.
+ * updated_at은 Readwise 공식 애플북스 앱이 DB를 재업로드할 때마다 옛 하이라이트에도 갱신되므로
+ * "최근에 하이라이트한 것"의 기준으로 쓰면 옛 책이 "방금 전"으로 맨 위에 올라온다 (2026-09-05 확인).
+ */
+export function highlightTime(h: ReadwiseHighlight): string {
+  return h.highlighted_at || h.created_at || h.updated_at || "";
+}
+
 const MAX_RESULTS = 100;
 
 export function searchHighlights(
@@ -43,6 +53,7 @@ export function searchHighlights(
     const bookTagsLower = bookTagNames.join(" ").toLowerCase();
 
     for (const h of book.highlights ?? []) {
+      if (h.is_deleted) continue; // Readwise 삭제 톰스톤
       const hTagNames = (h.tags ?? []).map((t) => t.name);
       const allTagNames = [...hTagNames, ...bookTagNames];
 
@@ -66,6 +77,7 @@ export function searchHighlights(
         if (text.includes(t)) score += 3;
         if (note.includes(t)) score += 2;
         if (bookTitle.includes(t)) score += 1;
+        if (bookAuthor.includes(t)) score += 1;
         if (tagsLower.includes(t) || bookTagsLower.includes(t)) score += 1;
       }
 
@@ -78,16 +90,21 @@ export function searchHighlights(
 }
 
 function applySort(hits: SearchHit[], sort: SortMode, hasQuery: boolean) {
+  // 최근 하이라이트 순 (ISO 8601 문자열 비교)
+  const newestFirst = (a: SearchHit, b: SearchHit) =>
+    highlightTime(b.highlight).localeCompare(highlightTime(a.highlight));
+
   if (sort === "relevance" && hasQuery) {
-    hits.sort((a, b) => b.score - a.score);
+    // 점수 동점이면 최근 하이라이트 순 — 캐시 순서에 따른 임의 배열 방지
+    hits.sort((a, b) => b.score - a.score || newestFirst(a, b));
     return;
   }
   if (sort === "recent" || (sort === "relevance" && !hasQuery)) {
-    hits.sort((a, b) => (b.highlight.updated_at ?? "").localeCompare(a.highlight.updated_at ?? ""));
+    hits.sort(newestFirst);
     return;
   }
   if (sort === "oldest") {
-    hits.sort((a, b) => (a.highlight.updated_at ?? "").localeCompare(b.highlight.updated_at ?? ""));
+    hits.sort((a, b) => highlightTime(a.highlight).localeCompare(highlightTime(b.highlight)));
     return;
   }
   if (sort === "book") {
@@ -97,7 +114,7 @@ function applySort(hits: SearchHit[], sort: SortMode, hasQuery: boolean) {
       const al = a.highlight.location ?? 0;
       const bl = b.highlight.location ?? 0;
       if (al !== bl) return al - bl;
-      return (b.highlight.updated_at ?? "").localeCompare(a.highlight.updated_at ?? "");
+      return newestFirst(a, b);
     });
     return;
   }
