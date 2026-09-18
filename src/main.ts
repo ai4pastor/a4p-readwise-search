@@ -5,6 +5,7 @@ import {
   ReadwiseSearchSettings,
   ReadwiseSearchSettingTab,
 } from "./settings";
+import { HighlightNoteIndex } from "./note-index";
 import { SyncService } from "./sync";
 import { CachedData, EMPTY_CACHE } from "./types";
 import {
@@ -22,9 +23,14 @@ export default class ReadwiseSearchPlugin extends Plugin {
   settings!: ReadwiseSearchSettings;
   cache!: CachedData;
   sync!: SyncService;
+  noteIndex!: HighlightNoteIndex;
 
   async onload() {
     await this.loadState();
+
+    // highlight_id → 노트 경로 인덱스 (카드 버튼 "노트 생성"/"노트 열기" 판정, 삭제·이동 즉시 반영)
+    this.noteIndex = new HighlightNoteIndex(this.app, () => this.settings.noteRootFolder);
+    this.noteIndex.register(this);
 
     this.sync = new SyncService(this);
     registerCitationTracker(this);

@@ -1,4 +1,5 @@
-import { App, Notice, normalizePath, TFile, TFolder } from "obsidian";
+import { App, MarkdownView, Notice, normalizePath, TFile, TFolder } from "obsidian";
+import { HighlightNoteIndex, parseHighlightId } from "./note-index";
 import { SearchHit } from "./search";
 import { ReadwiseSearchSettings } from "./settings";
 import { applyNoteTemplate } from "./templater";
@@ -130,42 +131,24 @@ function buildBaseName(n: NormalizedHighlight): string {
   return title || snippet || "highlight";
 }
 
-// 파일명 규칙과 무관하게 같은 highlight의 기존 노트를 찾는다
-// (파일명 상한이 바뀌기 전 만들어진 긴 이름의 노트도 중복 생성 없이 열기 위함)
-function findExistingByHighlightId(
-  app: App,
-  folder: string,
-  highlightId: number,
-): TFile | null {
-  const root = app.vault.getAbstractFileByPath(normalizePath(folder));
-  if (!(root instanceof TFolder)) return null;
-  for (const child of root.children) {
-    if (!(child instanceof TFile) || child.extension !== "md") continue;
-    const fmId = app.metadataCache.getFileCache(child)?.frontmatter?.highlight_id;
-    if (typeof fmId === "number" && fmId === highlightId) return child;
-  }
-  return null;
-}
-
-async function resolvePath(
+// 같은 highlight의 기존 노트는 HighlightNoteIndex(볼트 전체)가 먼저 찾는다.
+// 여기서는 빈 파일명을 고르되, 인덱스가 놓친 같은 id의 노트가 그 이름에 있으면 그것을 돌려준다.
+function resolvePath(
   app: App,
   folder: string,
   baseName: string,
   highlightId: number,
-): Promise<{ path: string; existing: TFile | null }> {
-  const byId = findExistingByHighlightId(app, folder, highlightId);
-  if (byId) return { path: byId.path, existing: byId };
-
+): { path: string; existing: TFile | null } {
   for (let i = 0; i < 50; i++) {
     const suffix = i === 0 ? "" : ` (${i + 1})`;
     const path = normalizePath(`${folder}/${baseName}${suffix}.md`);
     const file = app.vault.getAbstractFileByPath(path);
     if (!file) return { path, existing: null };
     if (file instanceof TFile) {
-      const fmId = app.metadataCache.getFileCache(file)?.frontmatter?.highlight_id;
-      if (typeof fmId === "number" && fmId === highlightId) {
-        return { path, existing: file };
-      }
+      const fmId = parseHighlightId(
+        app.metadataCache.getFileCache(file)?.frontmatter?.highlight_id,
+      );
+      if (fmId === highlightId) return { path, existing: file };
     }
   }
   throw new Error("같은 이름의 노트가 너무 많아 새 파일명을 만들 수 없습니다.");
@@ -233,6 +216,7 @@ async function ensureFolder(app: App, folderPath: string): Promise<void> {
 async function createOrOpen(
   app: App,
   settings: ReadwiseSearchSettings,
+  index: HighlightNoteIndex,
   n: NormalizedHighlight,
 ): Promise<void> {
   if (inFlight.has(n.highlightId)) {
@@ -241,7 +225,7 @@ async function createOrOpen(
   }
   inFlight.add(n.highlightId);
   try {
-    await createOrOpenInner(app, settings, n);
+    await createOrOpenInner(app, settings, index, n);
   } finally {
     inFlight.delete(n.highlightId);
   }
@@ -250,35 +234,63 @@ async function createOrOpen(
 async function createOrOpenInner(
   app: App,
   settings: ReadwiseSearchSettings,
+  index: HighlightNoteIndex,
   n: NormalizedHighlight,
 ): Promise<void> {
+  // 이미 있으면 바로 연다 — 카드 버튼이 "노트 열기"로 보이던 경우 (Notice 불필요)
+  const existing = index.getFile(n.highlightId);
+  if (existing) {
+    await openNote(app, existing);
+    return;
+  }
+
   const root = (settings.noteRootFolder || "Readwise").trim().replace(/^\/+|\/+$/g, "");
   await ensureFolder(app, root);
 
   const baseName = buildBaseName(n);
-  const { path, existing } = await resolvePath(app, root, baseName, n.highlightId);
-
-  let file: TFile;
-  if (existing) {
-    file = existing;
+  const { path, existing: probed } = resolvePath(app, root, baseName, n.highlightId);
+  if (probed) {
+    // 인덱스가 아직 못 본 노트(드묾) — 인덱스에 올리고 연다
+    index.add(probed.path, n.highlightId);
     new Notice("이미 존재하는 메모를 엽니다");
-  } else {
-    const created = await app.vault.create(path, buildContent(n));
-    if (!(created instanceof TFile)) throw new Error("메모 생성 결과를 확인할 수 없습니다.");
-    file = created;
-    if (settings.noteTemplatePath) {
-      new Notice("메모 생성됨 · 분류 템플릿 적용 중… (수 초 걸릴 수 있습니다)");
-      // 분류가 끝난 뒤 열어야 입력 중인 내용이 덮어써지지 않는다 (실패해도 노트는 그대로 열림)
-      await applyNoteTemplate(app, file, settings.noteTemplatePath, {
-        readwiseTags: n.tags,
-        highlightId: n.highlightId,
-      });
-    } else {
-      new Notice("메모 생성됨");
-    }
+    await openNote(app, probed);
+    return;
   }
 
-  // 새 탭에서 열어 바로 생각을 적도록
+  const created = await app.vault.create(path, buildContent(n));
+  if (!(created instanceof TFile)) throw new Error("메모 생성 결과를 확인할 수 없습니다.");
+  // metadataCache를 기다리지 않고 카드를 즉시 "노트 열기"로
+  index.add(created.path, n.highlightId);
+
+  if (settings.noteTemplatePath) {
+    new Notice("메모 생성됨 · 분류 템플릿 적용 중… (수 초 걸릴 수 있습니다)");
+    // 분류가 끝난 뒤 열어야 입력 중인 내용이 덮어써지지 않는다 (실패해도 노트는 그대로 열림)
+    await applyNoteTemplate(app, created, settings.noteTemplatePath, {
+      readwiseTags: n.tags,
+      highlightId: n.highlightId,
+    });
+  } else {
+    new Notice("메모 생성됨");
+  }
+
+  // 템플릿 실행 중 사용자가 노트를 지웠을 수 있다
+  if (!(app.vault.getAbstractFileByPath(created.path) instanceof TFile)) {
+    new Notice("노트가 생성 도중 삭제되어 열지 않습니다");
+    return;
+  }
+  await openNote(app, created);
+}
+
+/** 이미 열린 탭이 있으면 그 탭으로, 없으면 새 탭에서 열어 바로 생각을 적도록 */
+async function openNote(app: App, file: TFile): Promise<void> {
+  for (const leaf of app.workspace.getLeavesOfType("markdown")) {
+    const view = leaf.view;
+    if (view instanceof MarkdownView && view.file?.path === file.path) {
+      app.workspace.setActiveLeaf(leaf, { focus: true });
+      await app.workspace.revealLeaf(leaf);
+      return;
+    }
+  }
   const leaf = app.workspace.getLeaf(true);
   await leaf.openFile(file);
 }
@@ -286,10 +298,11 @@ async function createOrOpenInner(
 export async function createHighlightNoteFromHit(
   app: App,
   settings: ReadwiseSearchSettings,
+  index: HighlightNoteIndex,
   hit: SearchHit,
 ): Promise<void> {
   try {
-    await createOrOpen(app, settings, fromHit(hit));
+    await createOrOpen(app, settings, index, fromHit(hit));
   } catch (e) {
     handleError(e);
   }
@@ -298,10 +311,11 @@ export async function createHighlightNoteFromHit(
 export async function createHighlightNoteFromDaily(
   app: App,
   settings: ReadwiseSearchSettings,
+  index: HighlightNoteIndex,
   dh: DailyReviewHighlight,
 ): Promise<void> {
   try {
-    await createOrOpen(app, settings, fromDaily(dh));
+    await createOrOpen(app, settings, index, fromDaily(dh));
   } catch (e) {
     handleError(e);
   }

@@ -24,6 +24,7 @@ import {
   hasActiveFilters,
 } from "./filters";
 import type ReadwiseSearchPlugin from "./main";
+import type { NoteIndexChange } from "./note-index";
 import { highlightTime, searchHighlights, SearchHit, SortMode, splitQueryTerms } from "./search";
 import { DailyReview, DailyReviewHighlight } from "./types";
 
@@ -91,6 +92,9 @@ export class ReadwiseSearchView extends ItemView {
 
     this.tabsEl = root.createDiv({ cls: "a4p-rw-tabs" });
     this.bodyEl = root.createDiv({ cls: "a4p-rw-body-area" });
+
+    // 노트 생성·삭제·이동 시 해당 카드의 버튼만 제자리에서 갱신 (뷰가 닫히면 자동 해제)
+    this.registerEvent(this.plugin.noteIndex.onChange((ids) => this.refreshNoteButtons(ids)));
 
     this.renderTabs();
     this.renderActiveTab();
@@ -447,9 +451,9 @@ export class ReadwiseSearchView extends ItemView {
     const insertBtn = makeIconButton(actions, "quote", "인용 삽입", "a4p-rw-insert");
     insertBtn.addEventListener("click", () => insertCitation(this.app, hit));
 
-    const createBtn = makeIconButton(actions, "file-plus", "노트 생성", "a4p-rw-btn");
-    createBtn.addEventListener("click", () => {
-      void createHighlightNoteFromHit(this.app, this.plugin.settings, hit);
+    const noteBtn = this.makeNoteButton(actions, hit.highlight.id);
+    noteBtn.addEventListener("click", () => {
+      void createHighlightNoteFromHit(this.app, this.plugin.settings, this.plugin.noteIndex, hit);
     });
 
     const rwUrl = `https://readwise.io/bookreview/${hit.book.user_book_id}`;
@@ -484,6 +488,26 @@ export class ReadwiseSearchView extends ItemView {
       this.renderFilters();
       this.runSearch();
     }
+  }
+
+  /** 노트 버튼: 인덱스에 노트가 있으면 "노트 열기", 없으면 "노트 생성" */
+  private makeNoteButton(parent: HTMLElement, highlightId: number): HTMLButtonElement {
+    const btn = makeIconButton(parent, "file-plus", "노트 생성", ["a4p-rw-btn", "a4p-rw-note-btn"]);
+    btn.dataset.highlightId = String(highlightId);
+    applyNoteButtonState(btn, this.plugin.noteIndex.has(highlightId));
+    return btn;
+  }
+
+  /** 인덱스 변경 시 보이는 카드의 버튼만 갱신 — 전체 재렌더 없이 스크롤 유지 (bodyEl에는 활성 탭만 있음) */
+  private refreshNoteButtons(ids: NoteIndexChange) {
+    const buttons = this.bodyEl.querySelectorAll<HTMLButtonElement>(
+      ".a4p-rw-note-btn[data-highlight-id]",
+    );
+    buttons.forEach((btn) => {
+      const id = Number(btn.dataset.highlightId);
+      if (ids !== null && !ids.has(id)) return;
+      applyNoteButtonState(btn, this.plugin.noteIndex.has(id));
+    });
   }
 
   /** 설정의 기본 정렬이 바뀌면 열린 패널에도 즉시 반영 */
@@ -640,9 +664,9 @@ export class ReadwiseSearchView extends ItemView {
     const insertBtn = makeIconButton(actions, "quote", "인용 삽입", "a4p-rw-insert");
     insertBtn.addEventListener("click", () => insertDailyCitation(this.app, dh));
 
-    const createBtn = makeIconButton(actions, "file-plus", "노트 생성", "a4p-rw-btn");
-    createBtn.addEventListener("click", () => {
-      void createHighlightNoteFromDaily(this.app, this.plugin.settings, dh);
+    const noteBtn = this.makeNoteButton(actions, dh.id);
+    noteBtn.addEventListener("click", () => {
+      void createHighlightNoteFromDaily(this.app, this.plugin.settings, this.plugin.noteIndex, dh);
     });
 
     const url = dh.highlight_url || dh.source_url || dh.url;
@@ -685,13 +709,28 @@ function makeIconButton(
   parent: HTMLElement,
   icon: string,
   label: string,
-  cls: string,
+  cls: string | string[],
 ): HTMLButtonElement {
   const btn = parent.createEl("button", { cls });
   const iconEl = btn.createSpan({ cls: "a4p-rw-btn-icon" });
   setIcon(iconEl, icon);
   btn.createSpan({ cls: "a4p-rw-btn-label", text: label });
   return btn;
+}
+
+/** 노트 버튼의 아이콘·라벨·스타일을 노트 존재 여부에 맞춘다 */
+function applyNoteButtonState(btn: HTMLButtonElement, exists: boolean) {
+  const iconEl = btn.querySelector<HTMLElement>(".a4p-rw-btn-icon");
+  if (iconEl) {
+    iconEl.empty();
+    setIcon(iconEl, exists ? "file-check" : "file-plus");
+  }
+  btn.querySelector<HTMLElement>(".a4p-rw-btn-label")?.setText(exists ? "노트 열기" : "노트 생성");
+  btn.toggleClass("is-existing", exists);
+  btn.setAttr(
+    "aria-label",
+    exists ? "이 하이라이트의 메모가 이미 있습니다 — 클릭하면 엽니다" : "이 하이라이트로 새 메모를 만듭니다",
+  );
 }
 
 function renderCategoryChip(el: HTMLElement, category: string | null | undefined) {

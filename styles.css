@@ -339,6 +339,17 @@
   background: var(--interactive-accent-hover);
 }
 
+/* 노트가 이미 있는 highlight: "노트 열기" — 액센트 테두리로 "노트 생성"(중립)과 구분 */
+.a4p-rw-btn.is-existing {
+  border-color: var(--interactive-accent);
+  color: var(--text-accent);
+  background: color-mix(in srgb, var(--interactive-accent) 10%, transparent);
+}
+
+.a4p-rw-btn.is-existing:hover {
+  background: color-mix(in srgb, var(--interactive-accent) 18%, transparent);
+}
+
 .a4p-rw-btn-icon {
   display: inline-flex;
   align-items: center;
