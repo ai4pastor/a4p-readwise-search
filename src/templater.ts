@@ -47,6 +47,8 @@ export interface TemplateFill {
   /** 플러그인이 프론트매터에 쓴 Readwise 태그 — 템플릿이 tags를 덮어써도 합집합으로 복원 */
   readwiseTags: string[];
   highlightId: number;
+  /** 템플릿 본문 출력을 이 제목 앞에 넣는다 (없으면 파일 끝) — 사용자가 쓰는 자리를 밀지 않기 위함 */
+  insertBodyAbove?: string;
 }
 
 // ── Templater 접근 ────────────────────────────────────────────────
@@ -179,6 +181,19 @@ export function removeLeadingFrontmatterBlocks(text: string): string {
     out = out.slice(m[0].length);
   }
   return out;
+}
+
+/** 템플릿 본문 출력 삽입: `above` 제목이 있으면 그 앞(출처 다음)에, 없으면 파일 끝에 */
+export function insertTemplateBody(data: string, extra: string, above?: string): string {
+  if (above) {
+    const escaped = above.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const m = new RegExp(`(^|\\n)${escaped}[ \\t]*(?=\\n|$)`).exec(data);
+    if (m) {
+      const at = m.index + m[1].length;
+      return data.slice(0, at).replace(/\n*$/, "\n\n") + extra + "\n\n" + data.slice(at);
+    }
+  }
+  return data.replace(/\n*$/, "\n\n") + extra + "\n";
 }
 
 /** 옵시디언 태그 규칙: 선행 # 제거, 공백·언더바·슬래시·역슬래시 제거 */
@@ -329,7 +344,7 @@ export async function applyNoteTemplate(
         const out = await renderWithTemplater(tpl, templateFile, file, body);
         const extra = stripCursorMarkers(removeLeadingFrontmatterBlocks(out)).trim();
         if (extra) {
-          await app.vault.process(file, (data) => data.replace(/\n*$/, "\n\n") + extra + "\n");
+          await app.vault.process(file, (data) => insertTemplateBody(data, extra, fill.insertBodyAbove));
         }
         console.debug(LOG, "Pass B: 템플릿 스크립트 실행 완료", extra ? `본문 ${extra.length}자 추가` : "본문 추가 없음");
       }

@@ -1,4 +1,4 @@
-import { App, MarkdownView, Notice, normalizePath, TFile, TFolder } from "obsidian";
+import { App, MarkdownView, Notice, normalizePath, TFile, TFolder, WorkspaceLeaf } from "obsidian";
 import { HighlightNoteIndex, parseHighlightId } from "./note-index";
 import { SearchHit } from "./search";
 import { ReadwiseSearchSettings } from "./settings";
@@ -154,6 +154,9 @@ function resolvePath(
   throw new Error("같은 이름의 노트가 너무 많아 새 파일명을 만들 수 없습니다.");
 }
 
+/** 사용자가 생각을 적는 섹션 제목 — 본문 맨 아래에 두고, 생성 직후 커서가 이 아래로 간다 */
+export const THOUGHTS_HEADING = "## 내 생각";
+
 function buildContent(n: NormalizedHighlight): string {
   const fmLines: string[] = ["---"];
   fmLines.push(`book: ${yamlString(n.bookTitle)}`);
@@ -169,11 +172,9 @@ function buildContent(n: NormalizedHighlight): string {
   fmLines.push(`created_via: a4p-readwise-search`);
   fmLines.push("---");
 
+  // 출처(인용)를 먼저 읽고 바로 아래에 생각을 이어 쓰는 흐름 (v0.2.3, 사용자 요청)
   const headline = `${n.bookTitle}${n.author ? ` — ${n.author}` : ""}`;
   const body: string[] = [];
-  body.push(`## 내 생각`);
-  body.push("");
-  body.push("");
   body.push(`## 출처`);
   body.push(`> [!quote] ${headline}`);
   for (const line of n.text.trim().split("\n")) body.push(`> ${line}`);
@@ -188,6 +189,9 @@ function buildContent(n: NormalizedHighlight): string {
     if (n.sourceUrl) links.push(`[원문](${n.sourceUrl})`);
     body.push(links.join(" · "));
   }
+  body.push("");
+  body.push(THOUGHTS_HEADING);
+  body.push(""); // 커서 자리
 
   return fmLines.join("\n") + "\n\n" + body.join("\n") + "\n";
 }
@@ -268,6 +272,7 @@ async function createOrOpenInner(
     await applyNoteTemplate(app, created, settings.noteTemplatePath, {
       readwiseTags: n.tags,
       highlightId: n.highlightId,
+      insertBodyAbove: THOUGHTS_HEADING,
     });
   } else {
     new Notice("메모 생성됨");
@@ -278,11 +283,15 @@ async function createOrOpenInner(
     new Notice("노트가 생성 도중 삭제되어 열지 않습니다");
     return;
   }
-  await openNote(app, created);
+  await openNote(app, created, { cursorAtThoughts: true });
 }
 
-/** 이미 열린 탭이 있으면 그 탭으로, 없으면 새 탭에서 열어 바로 생각을 적도록 */
-async function openNote(app: App, file: TFile): Promise<void> {
+/** 이미 열린 탭이 있으면 그 탭으로, 없으면 새 탭(편집 모드)에서 열어 바로 생각을 적도록 */
+async function openNote(
+  app: App,
+  file: TFile,
+  opts: { cursorAtThoughts?: boolean } = {},
+): Promise<void> {
   for (const leaf of app.workspace.getLeavesOfType("markdown")) {
     const view = leaf.view;
     if (view instanceof MarkdownView && view.file?.path === file.path) {
@@ -292,7 +301,28 @@ async function openNote(app: App, file: TFile): Promise<void> {
     }
   }
   const leaf = app.workspace.getLeaf(true);
-  await leaf.openFile(file);
+  // 읽기 모드가 기본인 사용자도 바로 입력할 수 있게 편집 모드로 연다
+  await leaf.openFile(file, { state: { mode: "source" } });
+  if (opts.cursorAtThoughts) await placeCursorBelowHeading(leaf, THOUGHTS_HEADING);
+}
+
+/** 제목 바로 아래 빈 줄에 커서를 둔다. 에디터 내용이 아직 안 올라왔으면 잠시 기다려 재시도 */
+async function placeCursorBelowHeading(leaf: WorkspaceLeaf, heading: string): Promise<void> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const view = leaf.view;
+    if (!(view instanceof MarkdownView)) return;
+    const lines = view.editor.getValue().split("\n");
+    const idx = lines.findIndex((l) => l.trim() === heading);
+    if (idx >= 0) {
+      const line = Math.min(idx + 1, lines.length - 1);
+      view.editor.setCursor({ line, ch: 0 });
+      view.editor.focus();
+      return;
+    }
+    // 내용은 올라왔는데 제목이 없으면(사용자 편집 등) 건드리지 않는다
+    if (lines.join("").trim() !== "") return;
+    await new Promise((r) => setTimeout(r, 50));
+  }
 }
 
 export async function createHighlightNoteFromHit(
