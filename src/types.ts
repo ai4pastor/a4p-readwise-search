@@ -12,7 +12,10 @@ export interface ReadwiseHighlight {
   tags: ReadwiseTag[];
   /** Readwise에 처음 들어온 시각 — highlighted_at이 비어 있을 때 폴백 */
   created_at?: string | null;
-  /** Readwise 쪽에서 삭제된 하이라이트(톰스톤) — 검색에서 제외 */
+  /**
+   * Readwise에서 지운 하이라이트(톰스톤). 동기화 시 메모 노트가 있는 것만 캐시에 남고,
+   * 카드도 노트가 있을 때만 보인다 (src/sync.ts prune, src/search.ts)
+   */
   is_deleted?: boolean;
   is_discard?: boolean;
   is_favorite?: boolean;
@@ -38,6 +41,8 @@ export interface ReadwiseBook {
   readwise_url: string;
   source_url: string | null;
   book_tags: ReadwiseTag[];
+  /** Readwise에서 책째 삭제됨 — 동기화 시 소속 하이라이트를 모두 톰스톤으로 정규화 */
+  is_deleted?: boolean;
   highlights: ReadwiseHighlight[];
 }
 

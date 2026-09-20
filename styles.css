@@ -525,6 +525,26 @@
   border-color: rgba(99, 142, 99, 0.3);
 }
 
+/* Readwise에서 지웠지만 메모 노트가 있어 남긴 하이라이트 */
+.a4p-rw-deleted-chip {
+  font-size: var(--a4p-rw-fs-smaller);
+  padding: 1px 8px;
+  border-radius: 10px;
+  flex: 0 0 auto;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--text-muted);
+  background: var(--background-modifier-hover);
+  border: 1px dashed var(--background-modifier-border-hover);
+  white-space: nowrap;
+}
+
+.a4p-rw-card.is-deleted {
+  border-style: dashed;
+  border-left-style: solid;
+  border-left-color: var(--text-faint);
+}
+
 .a4p-rw-body {
   font-size: var(--a4p-rw-fs-medium);
   line-height: 1.6;

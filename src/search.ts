@@ -26,6 +26,8 @@ export function searchHighlights(
   rawQuery: string,
   filters: ActiveFilters = {},
   sort: SortMode = "relevance",
+  /** Readwise에서 지운 하이라이트(톰스톤)를 보여줄지 판정 — 메모 노트가 있으면 true */
+  hasNote?: (highlightId: number) => boolean,
 ): SearchHit[] {
   const query = rawQuery.trim();
 
@@ -53,7 +55,8 @@ export function searchHighlights(
     const bookTagsLower = bookTagNames.join(" ").toLowerCase();
 
     for (const h of book.highlights ?? []) {
-      if (h.is_deleted) continue; // Readwise 삭제 톰스톤
+      // Readwise에서 지운 하이라이트는 메모 노트를 만들어 둔 것만 보인다
+      if (h.is_deleted && !hasNote?.(h.id)) continue;
       const hTagNames = (h.tags ?? []).map((t) => t.name);
       const allTagNames = [...hTagNames, ...bookTagNames];
 

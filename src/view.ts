@@ -341,7 +341,10 @@ export class ReadwiseSearchView extends ItemView {
     const query = this.currentQuery.trim();
     const filtersActive = hasActiveFilters(this.filters);
     const isDefaultView = !query && !filtersActive;
-    const hits = searchHighlights(books, query, this.filters, this.sortMode);
+    // Readwise에서 지운 하이라이트는 메모 노트가 있는 것만 보인다
+    const hits = searchHighlights(books, query, this.filters, this.sortMode, (id) =>
+      this.plugin.noteIndex.has(id),
+    );
     const filterSummary = this.summarizeFilters();
 
     let base: string;
@@ -412,6 +415,14 @@ export class ReadwiseSearchView extends ItemView {
     const author = hit.book.author?.trim();
     if (author) subRow.createSpan({ cls: "a4p-rw-author", text: author });
     renderCategoryChip(subRow, hit.book.category);
+    if (hit.highlight.is_deleted) {
+      // Readwise에서 지웠지만 메모 노트가 있어 남긴 하이라이트 — 노트를 지우면 목록에서 빠진다
+      card.addClass("is-deleted");
+      card.dataset.deleted = "1";
+      subRow
+        .createSpan({ cls: "a4p-rw-deleted-chip", text: "Readwise에서 삭제됨" })
+        .setAttr("aria-label", "Readwise에서 지운 하이라이트입니다. 메모 노트가 있어 남겨 두었습니다");
+    }
     // 실제로 하이라이트한 시각 기준 (Readwise updated_at은 재업로드로 옛 항목도 갱신됨)
     const whenIso = highlightTime(hit.highlight);
     const when = formatRelative(whenIso);
@@ -498,16 +509,23 @@ export class ReadwiseSearchView extends ItemView {
     return btn;
   }
 
-  /** 인덱스 변경 시 보이는 카드의 버튼만 갱신 — 전체 재렌더 없이 스크롤 유지 (bodyEl에는 활성 탭만 있음) */
+  /**
+   * 인덱스 변경 시 보이는 카드의 버튼만 갱신 — 전체 재렌더 없이 스크롤 유지 (bodyEl에는 활성 탭만 있음).
+   * 단, Readwise에서 지운 카드(노트 덕에 남은 것)는 노트가 없어지면 목록에서도 빠져야 하므로 그때만 재검색.
+   */
   private refreshNoteButtons(ids: NoteIndexChange) {
     const buttons = this.bodyEl.querySelectorAll<HTMLButtonElement>(
       ".a4p-rw-note-btn[data-highlight-id]",
     );
+    let dropTombstone = false;
     buttons.forEach((btn) => {
       const id = Number(btn.dataset.highlightId);
       if (ids !== null && !ids.has(id)) return;
-      applyNoteButtonState(btn, this.plugin.noteIndex.has(id));
+      const exists = this.plugin.noteIndex.has(id);
+      applyNoteButtonState(btn, exists);
+      if (!exists && btn.closest(".a4p-rw-card")?.hasAttribute("data-deleted")) dropTombstone = true;
     });
+    if (dropTombstone && this.activeTab === "search") this.runSearch();
   }
 
   /** 설정의 기본 정렬이 바뀌면 열린 패널에도 즉시 반영 */

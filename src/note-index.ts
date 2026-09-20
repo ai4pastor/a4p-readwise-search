@@ -35,6 +35,8 @@ export class HighlightNoteIndex extends Events {
   private byId = new Map<number, Set<string>>();
   private byPath = new Map<string, number>();
   private resolvedOnce = false;
+  /** 첫 rebuild()가 끝났는지 — 그 전의 has()는 "아직 모름"이라 톰스톤 정리 근거로 쓰면 안 된다 */
+  private ready = false;
 
   constructor(
     private app: App,
@@ -69,6 +71,11 @@ export class HighlightNoteIndex extends Events {
 
   has(id: number): boolean {
     return (this.byId.get(id)?.size ?? 0) > 0;
+  }
+
+  /** 첫 rebuild() 이후 true. false면 has()가 false여도 노트가 없다고 단정할 수 없다 */
+  isReady(): boolean {
+    return this.ready;
   }
 
   /** 같은 id의 노트가 여럿이면: 노트 폴더 안 > 짧은 경로 > 사전순 */
@@ -109,6 +116,7 @@ export class HighlightNoteIndex extends Events {
       );
       if (id !== null) this.setPath(f.path, id);
     }
+    this.ready = true;
     this.trigger("change", null);
   }
 

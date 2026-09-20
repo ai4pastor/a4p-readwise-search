@@ -49,6 +49,9 @@ export class ReadwiseClient {
       const url = new URL(`${BASE_URL}/export/`);
       if (updatedAfter) url.searchParams.set("updatedAfter", updatedAfter);
       if (pageCursor) url.searchParams.set("pageCursor", pageCursor);
+      // Readwise에서 지운 하이라이트를 is_deleted 톰스톤으로 받는다 — 이게 없으면
+      // 삭제만 일어난 책은 updatedAfter 응답에 아예 안 온다 (2026-09-20 실측, v0.2.4)
+      url.searchParams.set("includeDeleted", "true");
 
       const res = await this.request(url.toString(), "GET");
 

@@ -27,6 +27,8 @@ export interface ReadwiseSearchSettings {
   defaultSort: SortMode;
   /** 노트 생성 직후 새 노트에 실행할 Templater 템플릿 경로 (빈 값 = 사용 안 함) */
   noteTemplatePath: string;
+  /** 캐시 형식 버전 — sync.ts의 CACHE_VERSION보다 낮으면 다음 동기화를 한 번 전체로 강제 (v0.2.4 삭제 반영) */
+  cacheVersion: number;
 }
 
 export const DEFAULT_SETTINGS: ReadwiseSearchSettings = {
@@ -38,6 +40,7 @@ export const DEFAULT_SETTINGS: ReadwiseSearchSettings = {
   fontScale: 90,
   defaultSort: "recent",
   noteTemplatePath: "",
+  cacheVersion: 0,
 };
 
 export class ReadwiseSearchSettingTab extends PluginSettingTab {
@@ -111,7 +114,9 @@ export class ReadwiseSearchSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("지금 동기화")
-      .setDesc("마지막 동기화 이후 변경된 항목만 받아옵니다.")
+      .setDesc(
+        "마지막 동기화 이후 변경된 항목만 받아옵니다. Readwise에서 지운 하이라이트도 목록에서 빠집니다 (메모 노트를 만든 것은 남습니다).",
+      )
       .addButton((btn) =>
         btn
           .setButtonText("동기화")
