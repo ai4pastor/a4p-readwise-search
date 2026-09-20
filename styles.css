@@ -297,6 +297,39 @@
   padding: 2px 4px;
 }
 
+/* 태그 섹션 토글 — 기본 접힘, 한 줄만 차지 (칩·더보기는 열었을 때만) */
+.a4p-rw-tags-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+  padding: 1px 2px;
+  border-radius: 4px;
+  line-height: 1.4;
+}
+
+.a4p-rw-tags-toggle:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.a4p-rw-tags-toggle-icon {
+  display: inline-flex;
+  align-items: center;
+}
+
+.a4p-rw-tags-toggle-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.a4p-rw-tags-toggle-meta {
+  color: var(--text-faint);
+}
+
 /* ───────── Buttons ───────── */
 
 .a4p-rw-btn,

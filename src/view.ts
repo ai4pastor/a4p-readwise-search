@@ -56,6 +56,8 @@ export class ReadwiseSearchView extends ItemView {
   };
   private options: FilterOptions = { books: [], tags: [], categories: [] };
   private tagsExpanded = false;
+  /** 태그 섹션 펼침 여부 — 기본 접힘(공간 확보, 2026-09-20 사용자 요청). 세션 상태, 설정에 저장 안 함 */
+  private tagsOpen = false;
   private sortMode: SortMode;
 
   // Daily tab state
@@ -280,12 +282,39 @@ export class ReadwiseSearchView extends ItemView {
     clearBtn.addEventListener("click", () => {
       this.filters = { bookIds: new Set(), tagNames: new Set(), categories: new Set() };
       this.tagsExpanded = false;
+      this.tagsOpen = false;
       this.sortMode = this.plugin.settings.defaultSort;
       this.renderFilters();
       this.runSearch();
     });
 
     if (this.options.tags.length > 0) {
+      // 태그는 기본 접힘 — 한 줄 토글만 두고 칩과 더보기는 열었을 때만 그린다
+      const selected = this.filters.tagNames?.size ?? 0;
+      const toggle = el.createDiv({ cls: "a4p-rw-tags-toggle" });
+      toggle.toggleClass("is-open", this.tagsOpen);
+      toggle.setAttr("role", "button");
+      toggle.setAttr("aria-expanded", String(this.tagsOpen));
+      const toggleIcon = toggle.createSpan({ cls: "a4p-rw-tags-toggle-icon" });
+      setIcon(toggleIcon, this.tagsOpen ? "chevron-down" : "chevron-right");
+      toggle.createSpan({
+        cls: "a4p-rw-tags-toggle-label",
+        text: this.tagsOpen ? "태그 접기" : "태그 열기",
+      });
+      toggle.createSpan({
+        cls: "a4p-rw-tags-toggle-meta",
+        text:
+          selected > 0
+            ? `${selected}개 선택 · 전체 ${this.options.tags.length}개`
+            : `${this.options.tags.length}개`,
+      });
+      toggle.addEventListener("click", () => {
+        this.tagsOpen = !this.tagsOpen;
+        this.renderFilters();
+      });
+    }
+
+    if (this.options.tags.length > 0 && this.tagsOpen) {
       const tagsRow = el.createDiv({ cls: "a4p-rw-tag-row" });
       const limit = this.tagsExpanded ? this.options.tags.length : TAG_VISIBLE_LIMIT;
       const visible = this.options.tags.slice(0, limit);
