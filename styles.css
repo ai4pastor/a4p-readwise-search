@@ -1578,3 +1578,72 @@
 .a4p-rw-browser.is-narrow.show-preview .a4p-rw-b-back {
   display: inline-flex;
 }
+
+/* ───────── 큰 검색 창: 검색 문법 도움말·최근 검색 (v0.4.0) ───────── */
+
+.a4p-rw-b-help,
+.a4p-rw-b-recent {
+  display: none;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.a4p-rw-b-help.is-open,
+.a4p-rw-b-recent.is-open {
+  display: flex;
+}
+
+.a4p-rw-browser .a4p-rw-b-help-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: auto;
+  padding: 3px 9px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  background: var(--background-primary);
+  box-shadow: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.a4p-rw-browser .a4p-rw-b-help-item:hover {
+  color: var(--text-normal);
+  border-color: var(--background-modifier-border-hover);
+}
+
+.a4p-rw-b-help-item code {
+  padding: 0;
+  background: none;
+  color: var(--text-normal);
+  font-size: 12px;
+}
+
+.a4p-rw-b-recent-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-faint);
+}
+
+.a4p-rw-browser .a4p-rw-b-chip {
+  max-width: 220px;
+  height: auto;
+  overflow: hidden;
+  padding: 2px 9px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.a4p-rw-browser .a4p-rw-b-chip:hover {
+  color: var(--text-normal);
+  border-color: var(--background-modifier-border-hover);
+}

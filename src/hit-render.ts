@@ -1,4 +1,6 @@
-/** terms(소문자)가 나오는 곳을 <mark>로 감싸 그린다 */
+import { choseongRanges, isChoseongQuery } from "./korean";
+
+/** terms(소문자)가 나오는 곳을 <mark>로 감싸 그린다 — 초성 검색어(ㅎㄴㄴ)는 그 초성의 글자들을 칠한다 */
 export function renderTextWithMarks(el: HTMLElement, text: string, terms: string[]) {
   if (terms.length === 0 || !text) {
     el.setText(text);
@@ -9,6 +11,10 @@ export function renderTextWithMarks(el: HTMLElement, text: string, terms: string
   const ranges: Range[] = [];
   for (const t of terms) {
     if (!t) continue;
+    if (isChoseongQuery(t)) {
+      ranges.push(...choseongRanges(text, t));
+      continue;
+    }
     let from = 0;
     while (true) {
       const idx = lower.indexOf(t, from);
@@ -44,7 +50,7 @@ export function snippetAround(text: string, terms: string[], max = 140): string 
   const lower = flat.toLowerCase();
   let idx = -1;
   for (const t of terms) {
-    const i = t ? lower.indexOf(t) : -1;
+    const i = !t ? -1 : isChoseongQuery(t) ? (choseongRanges(flat, t)[0]?.start ?? -1) : lower.indexOf(t);
     if (i !== -1 && (idx === -1 || i < idx)) idx = i;
   }
   if (idx <= 40) return flat.slice(0, max) + "…";

@@ -28,6 +28,7 @@ import {
 import { formatRelative, renderTextWithMarks } from "./hit-render";
 import type ReadwiseSearchPlugin from "./main";
 import type { NoteIndexChange } from "./note-index";
+import { describeQuery } from "./query";
 import { highlightTime, SearchHit, searchWithFallback, SortMode } from "./search";
 import { DailyReview, DailyReviewHighlight } from "./types";
 
@@ -163,7 +164,7 @@ export class ReadwiseSearchView extends ItemView {
 
     this.inputEl = inputWrap.createEl("input", {
       cls: "a4p-rw-search-input",
-      attr: { type: "text", placeholder: "highlights 검색..." },
+      attr: { type: "text", placeholder: "검색 — 초성 ㅎㄴㄴ · \"구절\" · -빼기 · 책: · #태그" },
     });
     this.inputEl.value = this.currentQuery;
     this.inputEl.addEventListener("input", () => {
@@ -404,6 +405,8 @@ export class ReadwiseSearchView extends ItemView {
       base = `${hits.length}건 (상위 100건)`;
     } else if (hits.length === 0) {
       base = "결과 없음";
+    } else if (outcome.mode === "qwerty") {
+      base = `${hits.length}건 · 영문 자판을 한글로 바꿔 찾음 (${outcome.converted.map((c) => `${c.from} → ${c.to}`).join(", ")})`;
     } else if (outcome.mode === "stem") {
       base = `${hits.length}건 · 조사를 뗀 낱말로 찾음`;
     } else if (outcome.mode === "partial") {
@@ -411,7 +414,10 @@ export class ReadwiseSearchView extends ItemView {
     } else {
       base = `${hits.length}건 (상위 100건까지)`;
     }
-    this.searchStatusEl.setText(filterSummary ? `${base} · ${filterSummary}` : base);
+    const condition = outcome.query.hasSyntax ? describeQuery(outcome.query) : "";
+    this.searchStatusEl.setText(
+      [base, condition && `조건: ${condition}`, filterSummary].filter(Boolean).join(" · "),
+    );
     this.renderSearchResults(hits);
   }
 

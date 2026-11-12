@@ -51,6 +51,8 @@ export interface ReadwiseSearchSettings {
   autoSyncMinutes: number;
   /** Obsidian을 켤 때 한 번 동기화 (v0.3.1) */
   syncOnStartup: boolean;
+  /** 큰 검색 창의 최근 검색어 — 최근 것이 앞 (v0.4.0) */
+  recentQueries: string[];
 }
 
 export const DEFAULT_SETTINGS: ReadwiseSearchSettings = {
@@ -69,6 +71,7 @@ export const DEFAULT_SETTINGS: ReadwiseSearchSettings = {
   tokenStorage: "settings",
   autoSyncMinutes: 60,
   syncOnStartup: true,
+  recentQueries: [],
 };
 
 export class ReadwiseSearchSettingTab extends PluginSettingTab {

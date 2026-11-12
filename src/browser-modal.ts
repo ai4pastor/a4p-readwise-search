@@ -15,7 +15,16 @@ import type { ActiveFilters } from "./filters";
 import { createHighlightNoteFromHit } from "./highlight-note";
 import { formatRelative, renderTextWithMarks, snippetAround } from "./hit-render";
 import type ReadwiseSearchPlugin from "./main";
-import { highlightTime, MatchMode, queryAll, SearchHit, sortHits, SortMode } from "./search";
+import { describeQuery } from "./query";
+import {
+  highlightTime,
+  MatchMode,
+  queryAll,
+  SearchHit,
+  SearchOutcome,
+  sortHits,
+  SortMode,
+} from "./search";
 import type { ReadwiseBook, ReadwiseHighlight } from "./types";
 
 /** 노트에서 시작 글자(,,)로 열었을 때 인용으로 바꿀 자리 */
@@ -72,6 +81,18 @@ const DEBOUNCE_MS = 120;
 /** 창 폭이 이보다 좁으면 한 단으로 접고 필터·미리보기를 덮개로 연다 */
 const NARROW_PX = 900;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const RECENT_MAX = 8;
+/** "검색 문법" 줄의 예시 — 누르면 검색칸에 붙는다 (v0.4.0) */
+const SEARCH_EXAMPLES: Array<[string, string]> = [
+  ["ㅎㄴㄴ", "초성으로 찾기"],
+  ['"하나님의 은혜"', "띄어쓰기까지 그대로"],
+  ["-번영", "이 낱말이 든 밑줄 빼기"],
+  ["책:기도", "책 제목에서"],
+  ["저자:김", "저자 이름에서"],
+  ["#설교", "태그에서"],
+  ["메모:적용", "내 메모에서"],
+  ["rleh", "한영 전환을 잊고 친 글자 — 결과가 없으면 '기도'로"],
+];
 
 /**
  * 큰 검색 창 (v0.3.0, 시안 A — 2026-11-12 사용자 선택).
@@ -101,6 +122,7 @@ export class HighlightBrowserModal extends Modal {
   private mode: MatchMode = "all";
   private terms: string[] = [];
   private counts: FacetCounts | null = null;
+  private outcome: SearchOutcome | null = null;
   private current: SearchHit | null = null;
   /** 고른 순서대로 넣는다 */
   private selected = new Map<number, SearchHit>();
@@ -118,6 +140,8 @@ export class HighlightBrowserModal extends Modal {
   private selectionEl!: HTMLElement;
   private facetEls!: Record<"category" | "book" | "tag" | "state" | "period", HTMLElement>;
   private bookCountEl!: HTMLElement;
+  private helpEl!: HTMLElement;
+  private recentEl!: HTMLElement;
 
   constructor(plugin: ReadwiseSearchPlugin, opts: BrowserOpenOptions = {}) {
     super(plugin.app);
@@ -156,6 +180,7 @@ export class HighlightBrowserModal extends Modal {
 
   onClose() {
     if (this.timer !== null) window.clearTimeout(this.timer);
+    this.rememberQuery();
     this.resizeObserver?.disconnect();
     this.contentEl.empty();
   }
@@ -188,6 +213,7 @@ export class HighlightBrowserModal extends Modal {
     const outcome = queryAll(this.plugin.cache.books, this.query, (id) =>
       this.plugin.noteIndex.has(id),
     );
+    this.outcome = outcome;
     this.mode = outcome.mode;
     this.terms = outcome.terms;
     this.counts = this.countFacets(outcome.hits);
@@ -204,6 +230,7 @@ export class HighlightBrowserModal extends Modal {
     this.renderList();
     this.renderPreview();
     this.renderSelection();
+    this.renderRecent();
     // 필터 단추 등을 누른 경우에만 검색칸으로 돌아온다. 검색칸에서 타이핑 중이면 건드리지 않는다
     // (커서를 옮기면 한글 조합이 끊긴다)
     const active = document.activeElement;
@@ -391,6 +418,7 @@ export class HighlightBrowserModal extends Modal {
     syncClear();
     this.inputEl.addEventListener("input", () => {
       syncClear();
+      this.renderRecent();
       if (this.timer !== null) window.clearTimeout(this.timer);
       this.timer = window.setTimeout(() => {
         this.timer = null;
@@ -410,6 +438,22 @@ export class HighlightBrowserModal extends Modal {
     setIcon(filterBtn.createSpan(), "sliders-horizontal");
     filterBtn.createSpan({ text: "필터" });
     filterBtn.addEventListener("click", () => this.modalEl.toggleClass("show-facets", !this.modalEl.hasClass("show-facets")));
+    const helpBtn = row.createEl("button", { cls: "a4p-rw-b-ghost" });
+    setIcon(helpBtn.createSpan(), "help-circle");
+    helpBtn.createSpan({ text: "검색 문법" });
+    helpBtn.addEventListener("click", () => {
+      this.helpEl.toggleClass("is-open", !this.helpEl.hasClass("is-open"));
+      this.focusInput();
+    });
+
+    this.helpEl = bar.createDiv({ cls: "a4p-rw-b-help" });
+    for (const [example, label] of SEARCH_EXAMPLES) {
+      const item = this.helpEl.createEl("button", { cls: "a4p-rw-b-help-item" });
+      item.createEl("code", { text: example });
+      item.createSpan({ text: label });
+      item.addEventListener("click", () => this.appendToQuery(example));
+    }
+    this.recentEl = bar.createDiv({ cls: "a4p-rw-b-recent" });
 
     const row2 = bar.createDiv({ cls: "a4p-rw-b-row" });
     this.sortEl = row2.createDiv({ cls: "a4p-rw-b-seg" });
@@ -580,10 +624,15 @@ export class HighlightBrowserModal extends Modal {
     const el = this.statusEl;
     el.empty();
     el.createEl("b", { text: `${this.list.length.toLocaleString()}건` });
+    if (this.mode === "qwerty" && this.outcome) {
+      const pairs = this.outcome.converted.map((c) => `${c.from} → ${c.to}`).join(", ");
+      el.createSpan({ cls: "a4p-rw-b-mode", text: ` · 영문 자판을 한글로 바꿔 찾음 (${pairs})` });
+    }
     if (this.mode === "stem") el.createSpan({ cls: "a4p-rw-b-mode", text: " · 조사를 뗀 낱말로 찾음" });
     if (this.mode === "partial") {
       el.createSpan({ cls: "a4p-rw-b-mode", text: " · 모든 낱말이 든 결과가 없어 일부만 맞는 결과" });
     }
+    if (this.outcome?.query.hasSyntax) el.appendText(` · 조건: ${describeQuery(this.outcome.query)}`);
     const parts: string[] = [];
     if (this.categories.size) parts.push(`종류 ${this.categories.size}`);
     if (this.bookIds.size) parts.push(`책 ${this.bookIds.size}`);
@@ -597,6 +646,51 @@ export class HighlightBrowserModal extends Modal {
       const reset = el.createEl("button", { cls: "a4p-rw-b-reset", text: "필터 초기화" });
       reset.addEventListener("click", () => this.resetFilters());
     }
+  }
+
+  /** 검색칸이 비어 있을 때만 최근 검색어를 칩으로 보인다 */
+  private renderRecent() {
+    const el = this.recentEl;
+    el.empty();
+    const recent = this.plugin.settings.recentQueries;
+    const show = this.inputEl.value.trim() === "" && recent.length > 0;
+    el.toggleClass("is-open", show);
+    if (!show) return;
+    el.createSpan({ cls: "a4p-rw-b-recent-label", text: "최근 검색" });
+    for (const q of recent) {
+      const chip = el.createEl("button", { cls: "a4p-rw-b-chip", text: q });
+      chip.setAttr("aria-label", q);
+      chip.addEventListener("click", () => {
+        this.inputEl.value = q;
+        this.inputEl.dispatchEvent(new Event("input"));
+        this.focusInput();
+      });
+    }
+    const clear = el.createEl("button", { cls: "a4p-rw-b-reset", text: "지우기" });
+    clear.addEventListener("click", async () => {
+      this.plugin.settings.recentQueries = [];
+      await this.plugin.persist();
+      this.renderRecent();
+      this.focusInput();
+    });
+  }
+
+  /** 예시를 검색칸 끝에 붙여 바로 찾는다 */
+  private appendToQuery(text: string) {
+    const current = this.inputEl.value.trim();
+    this.inputEl.value = current ? `${current} ${text}` : text;
+    this.inputEl.dispatchEvent(new Event("input"));
+    this.focusInput();
+  }
+
+  /** 결과가 있었던 검색어만 최근 검색에 남긴다 (창을 닫을 때) */
+  private rememberQuery() {
+    const q = this.query.trim();
+    if (!q || this.list.length === 0) return;
+    const recent = this.plugin.settings.recentQueries.filter((x) => x !== q);
+    recent.unshift(q);
+    this.plugin.settings.recentQueries = recent.slice(0, RECENT_MAX);
+    void this.plugin.persist();
   }
 
   private renderList() {
