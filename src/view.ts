@@ -7,8 +7,9 @@ import {
 } from "./api";
 import { BookSuggestModal } from "./book-suggest-modal";
 import {
-  formatCallout,
-  formatDailyCallout,
+  citationOptions,
+  formatDailyCitation,
+  formatHitCitation,
   insertCitation,
   insertDailyCitation,
   insertDailyCitations,
@@ -23,9 +24,10 @@ import {
   FilterOptions,
   hasActiveFilters,
 } from "./filters";
+import { formatRelative, renderTextWithMarks } from "./hit-render";
 import type ReadwiseSearchPlugin from "./main";
 import type { NoteIndexChange } from "./note-index";
-import { highlightTime, searchHighlights, SearchHit, SortMode, splitQueryTerms } from "./search";
+import { highlightTime, SearchHit, searchWithFallback, SortMode } from "./search";
 import { DailyReview, DailyReviewHighlight } from "./types";
 
 export const VIEW_TYPE_READWISE_SEARCH = "a4p-readwise-search-view";
@@ -49,6 +51,8 @@ export class ReadwiseSearchView extends ItemView {
   private searchResultsEl: HTMLDivElement | null = null;
   private debounceTimer: number | null = null;
   private currentQuery = "";
+  /** 카드에서 강조할 낱말 — 조사를 떼고 찾았으면 뗀 낱말 (searchWithFallback) */
+  private markTerms: string[] = [];
   private filters: ActiveFilters = {
     bookIds: new Set(),
     tagNames: new Set(),
@@ -181,6 +185,22 @@ export class ReadwiseSearchView extends ItemView {
     setIcon(syncBtn, "refresh-cw");
     syncBtn.setAttr("aria-label", "Readwise 동기화 (증분)");
     syncBtn.addEventListener("click", () => void this.runSyncFromPanel(syncBtn));
+
+    // 지금 검색어·필터 그대로 큰 검색 창에서 보기 (v0.3.0)
+    const bigBtn = header.createEl("button", { cls: "a4p-rw-big-btn" });
+    setIcon(bigBtn.createSpan({ cls: "a4p-rw-big-btn-icon" }), "maximize-2");
+    bigBtn.createSpan({ text: "크게 보기" });
+    bigBtn.setAttr("aria-label", "큰 검색 창에서 보기 — 지금 검색어와 필터가 그대로 넘어갑니다");
+    bigBtn.addEventListener("click", () =>
+      this.plugin.openBrowser({
+        query: this.currentQuery,
+        filters: {
+          bookIds: new Set(this.filters.bookIds),
+          tagNames: new Set(this.filters.tagNames),
+          categories: new Set(this.filters.categories),
+        },
+      }),
+    );
 
     this.filtersEl = root.createDiv({ cls: "a4p-rw-filters" });
     this.searchStatusEl = root.createDiv({ cls: "a4p-rw-status" });
@@ -371,16 +391,24 @@ export class ReadwiseSearchView extends ItemView {
     const filtersActive = hasActiveFilters(this.filters);
     const isDefaultView = !query && !filtersActive;
     // Readwise에서 지운 하이라이트는 메모 노트가 있는 것만 보인다
-    const hits = searchHighlights(books, query, this.filters, this.sortMode, (id) =>
+    const outcome = searchWithFallback(books, query, this.filters, this.sortMode, (id) =>
       this.plugin.noteIndex.has(id),
     );
+    const hits = outcome.hits;
+    this.markTerms = outcome.terms;
     const filterSummary = this.summarizeFilters();
 
     let base: string;
     if (isDefaultView) {
       base = `${hits.length}건 (상위 100건)`;
+    } else if (hits.length === 0) {
+      base = "결과 없음";
+    } else if (outcome.mode === "stem") {
+      base = `${hits.length}건 · 조사를 뗀 낱말로 찾음`;
+    } else if (outcome.mode === "partial") {
+      base = `${hits.length}건 · 모든 낱말이 든 결과가 없어 일부만 맞는 결과 (본문에서 맞은 낱말 수 순)`;
     } else {
-      base = hits.length === 0 ? "결과 없음" : `${hits.length}건 (상위 100건까지)`;
+      base = `${hits.length}건 (상위 100건까지)`;
     }
     this.searchStatusEl.setText(filterSummary ? `${base} · ${filterSummary}` : base);
     this.renderSearchResults(hits);
@@ -429,10 +457,10 @@ export class ReadwiseSearchView extends ItemView {
     if (!this.searchResultsEl) return;
     const card = this.searchResultsEl.createDiv({ cls: "a4p-rw-card" });
 
-    this.attachDrag(card, () => formatCallout(hit));
+    this.attachDrag(card, () => formatHitCitation(hit, citationOptions(this.plugin.settings)));
     this.addDragHandle(card);
 
-    const terms = splitQueryTerms(this.currentQuery);
+    const terms = this.markTerms;
 
     const meta = card.createDiv({ cls: "a4p-rw-meta" });
     const titleRow = meta.createDiv({ cls: "a4p-rw-meta-title-row" });
@@ -489,7 +517,9 @@ export class ReadwiseSearchView extends ItemView {
 
     const actions = card.createDiv({ cls: "a4p-rw-actions" });
     const insertBtn = makeIconButton(actions, "quote", "인용 삽입", "a4p-rw-insert");
-    insertBtn.addEventListener("click", () => insertCitation(this.app, hit));
+    insertBtn.addEventListener("click", () =>
+      insertCitation(this.app, hit, citationOptions(this.plugin.settings)),
+    );
 
     const noteBtn = this.makeNoteButton(actions, hit.highlight.id);
     noteBtn.addEventListener("click", () => {
@@ -609,7 +639,11 @@ export class ReadwiseSearchView extends ItemView {
         new Notice("삽입할 항목이 없습니다.");
         return;
       }
-      const ok = insertDailyCitations(this.app, this.dailyReview.highlights);
+      const ok = insertDailyCitations(
+        this.app,
+        this.dailyReview.highlights,
+        citationOptions(this.plugin.settings),
+      );
       if (ok) new Notice(`${this.dailyReview.highlights.length}개 인용 삽입 완료`);
     });
 
@@ -682,7 +716,7 @@ export class ReadwiseSearchView extends ItemView {
     if (!this.dailyResultsEl) return;
     const card = this.dailyResultsEl.createDiv({ cls: "a4p-rw-card" });
 
-    this.attachDrag(card, () => formatDailyCallout(dh));
+    this.attachDrag(card, () => formatDailyCitation(dh, citationOptions(this.plugin.settings)));
     this.addDragHandle(card);
 
     const meta = card.createDiv({ cls: "a4p-rw-meta" });
@@ -709,7 +743,9 @@ export class ReadwiseSearchView extends ItemView {
 
     const actions = card.createDiv({ cls: "a4p-rw-actions" });
     const insertBtn = makeIconButton(actions, "quote", "인용 삽입", "a4p-rw-insert");
-    insertBtn.addEventListener("click", () => insertDailyCitation(this.app, dh));
+    insertBtn.addEventListener("click", () =>
+      insertDailyCitation(this.app, dh, citationOptions(this.plugin.settings)),
+    );
 
     const noteBtn = this.makeNoteButton(actions, dh.id);
     noteBtn.addEventListener("click", () => {
@@ -796,56 +832,3 @@ function renderCategoryChip(el: HTMLElement, category: string | null | undefined
   });
 }
 
-function formatRelative(iso: string | null | undefined): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return "";
-  const diffSec = Math.floor((Date.now() - d.getTime()) / 1000);
-  if (diffSec < 60) return "방금 전";
-  if (diffSec < 60 * 60) return `${Math.floor(diffSec / 60)}분 전`;
-  const day = 24 * 60 * 60;
-  if (diffSec < day) return `${Math.floor(diffSec / 3600)}시간 전`;
-  if (diffSec < 2 * day) return "어제";
-  if (diffSec < 7 * day) return `${Math.floor(diffSec / day)}일 전`;
-  if (diffSec < 30 * day) return `${Math.floor(diffSec / (7 * day))}주 전`;
-  if (diffSec < 365 * day) return `${Math.floor(diffSec / (30 * day))}달 전`;
-  return `${Math.floor(diffSec / (365 * day))}년 전`;
-}
-
-function renderTextWithMarks(el: HTMLElement, text: string, terms: string[]) {
-  if (terms.length === 0 || !text) {
-    el.setText(text);
-    return;
-  }
-  const lower = text.toLowerCase();
-  type Range = { start: number; end: number };
-  const ranges: Range[] = [];
-  for (const t of terms) {
-    if (!t) continue;
-    let from = 0;
-    while (true) {
-      const idx = lower.indexOf(t, from);
-      if (idx === -1) break;
-      ranges.push({ start: idx, end: idx + t.length });
-      from = idx + t.length;
-    }
-  }
-  if (ranges.length === 0) {
-    el.setText(text);
-    return;
-  }
-  ranges.sort((a, b) => a.start - b.start || a.end - b.end);
-  const merged: Range[] = [];
-  for (const r of ranges) {
-    const last = merged[merged.length - 1];
-    if (last && r.start <= last.end) last.end = Math.max(last.end, r.end);
-    else merged.push({ ...r });
-  }
-  let cursor = 0;
-  for (const r of merged) {
-    if (cursor < r.start) el.appendText(text.slice(cursor, r.start));
-    el.createEl("mark", { text: text.slice(r.start, r.end) });
-    cursor = r.end;
-  }
-  if (cursor < text.length) el.appendText(text.slice(cursor));
-}

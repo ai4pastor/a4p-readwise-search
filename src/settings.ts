@@ -9,6 +9,16 @@ import {
   TFolder,
 } from "obsidian";
 import { ReadwiseAuthError, ReadwiseClient } from "./api";
+import {
+  CITATION_FORMAT_LABELS,
+  CitationFormat,
+  CitationSource,
+  DEFAULT_CUSTOM_TEMPLATE,
+  formatCitation,
+  SAMPLE_SOURCE,
+  sourceFromHit,
+  TEMPLATE_VARIABLES,
+} from "./citation-format";
 import { FileSuggest } from "./file-suggest";
 import { FolderSuggest } from "./folder-suggest";
 import type ReadwiseSearchPlugin from "./main";
@@ -29,6 +39,12 @@ export interface ReadwiseSearchSettings {
   noteTemplatePath: string;
   /** 캐시 형식 버전 — sync.ts의 CACHE_VERSION보다 낮으면 다음 동기화를 한 번 전체로 강제 (v0.2.4 삭제 반영) */
   cacheVersion: number;
+  /** 인용 형식 (v0.3.0) — 기본 콜아웃은 v0.2.x와 같은 출력 */
+  citationFormat: CitationFormat;
+  /** citationFormat이 custom일 때 쓰는 템플릿 */
+  citationTemplate: string;
+  /** 노트 안 자동완성 시작 글자 (빈 값 = 끔) */
+  suggestTrigger: string;
 }
 
 export const DEFAULT_SETTINGS: ReadwiseSearchSettings = {
@@ -41,6 +57,9 @@ export const DEFAULT_SETTINGS: ReadwiseSearchSettings = {
   defaultSort: "recent",
   noteTemplatePath: "",
   cacheVersion: 0,
+  citationFormat: "callout",
+  citationTemplate: DEFAULT_CUSTOM_TEMPLATE,
+  suggestTrigger: ",,",
 };
 
 export class ReadwiseSearchSettingTab extends PluginSettingTab {
@@ -146,6 +165,42 @@ export class ReadwiseSearchSettingTab extends PluginSettingTab {
           }),
       );
 
+    containerEl.createEl("h3", { text: "인용 넣기" });
+
+    new Setting(containerEl)
+      .setName("인용 형식")
+      .setDesc(
+        "인용 삽입 버튼, 드래그, Daily Review, 큰 검색 창에 모두 적용됩니다. 각주는 옵시디언 인라인 각주(^[…])로 들어가서 읽기 화면에서 번호 각주로 보입니다.",
+      )
+      .addDropdown((dd) =>
+        dd
+          .addOptions(CITATION_FORMAT_LABELS)
+          .setValue(this.plugin.settings.citationFormat)
+          .onChange(async (value) => {
+            this.plugin.settings.citationFormat = value as CitationFormat;
+            await this.plugin.persist();
+            this.renderCitationArea(citationArea);
+          }),
+      );
+
+    const citationArea = containerEl.createDiv();
+    this.renderCitationArea(citationArea);
+
+    new Setting(containerEl)
+      .setName("큰 검색 창 여는 글자")
+      .setDesc(
+        "노트에서 이 글자를 치면 큰 검색 창이 열리고, 창에서 고른 밑줄이 그 자리에 인용으로 들어갑니다. 비워 두면 끕니다. 다른 플러그인과 겹치지 않는 두 글자를 쓰세요 — a4p 성경구절 플러그인은 ;; 와 ;;; 를 씁니다. (기본 ,,)",
+      )
+      .addText((text) =>
+        text
+          .setPlaceholder(",,")
+          .setValue(this.plugin.settings.suggestTrigger)
+          .onChange(async (value) => {
+            this.plugin.settings.suggestTrigger = value.replace(/\s/g, "");
+            await this.plugin.persist();
+          }),
+      );
+
     containerEl.createEl("h3", { text: "Highlight 노트 생성" });
 
     new Setting(containerEl)
@@ -248,6 +303,82 @@ export class ReadwiseSearchSettingTab extends PluginSettingTab {
             this.plugin.applyFontScaleToViews();
           }),
       );
+  }
+
+  /** 형식이 사용자 정의면 템플릿 입력란을 보이고, 어떤 형식이든 미리보기를 그린다 */
+  private renderCitationArea(el: HTMLElement): void {
+    el.empty();
+    const settings = this.plugin.settings;
+    let preview: HTMLElement | null = null;
+    const updatePreview = () => {
+      preview?.setText(
+        formatCitation(this.previewSource(), {
+          format: settings.citationFormat,
+          template: settings.citationTemplate,
+        }),
+      );
+    };
+
+    if (settings.citationFormat === "custom") {
+      const desc = document.createDocumentFragment();
+      desc.appendText("쓸 수 있는 변수: ");
+      TEMPLATE_VARIABLES.forEach(([key, label], i) => {
+        if (i > 0) desc.appendText(" · ");
+        desc.createEl("code", { text: `{{${key}}}` });
+        desc.appendText(` ${label}`);
+      });
+      desc.createEl("br");
+      desc.appendText("값이 모두 빈 줄은 빠집니다. ");
+      desc.createEl("code", { text: "{{#author}} — {{author}}{{/author}}" });
+      desc.appendText("처럼 쓰면 값이 있을 때만 들어갑니다.");
+
+      new Setting(el)
+        .setName("사용자 정의 템플릿")
+        .setDesc(desc)
+        .setClass("a4p-rw-template-setting")
+        .addTextArea((ta) => {
+          ta.setValue(settings.citationTemplate).onChange(async (value) => {
+            settings.citationTemplate = value;
+            await this.plugin.persist();
+            updatePreview();
+          });
+          ta.inputEl.rows = 7;
+          ta.inputEl.addClass("a4p-rw-template-input");
+        })
+        .addExtraButton((btn) =>
+          btn
+            .setIcon("rotate-ccw")
+            .setTooltip("기본 템플릿으로 되돌리기")
+            .onClick(async () => {
+              settings.citationTemplate = DEFAULT_CUSTOM_TEMPLATE;
+              await this.plugin.persist();
+              this.renderCitationArea(el);
+            }),
+        );
+    }
+
+    const previewSetting = new Setting(el)
+      .setName("미리보기")
+      .setDesc("캐시에 있는 하이라이트 하나(없으면 예시)로 만든 모양입니다.");
+    previewSetting.settingEl.addClass("a4p-rw-preview-setting");
+    preview = el.createEl("pre", { cls: "a4p-rw-citation-preview" });
+    updatePreview();
+  }
+
+  /** 미리보기 재료 — 쪽수가 있는 책 하이라이트 → 아무 하이라이트 → 예시 순 */
+  private previewSource(): CitationSource {
+    let fallback: CitationSource | null = null;
+    for (const book of this.plugin.cache.books) {
+      for (const highlight of book.highlights ?? []) {
+        if (highlight.is_deleted) continue;
+        const src = sourceFromHit({ highlight, book, score: 0 });
+        if (book.category === "books" && highlight.location_type === "page" && highlight.location > 0) {
+          return src;
+        }
+        if (!fallback) fallback = src;
+      }
+    }
+    return fallback ?? SAMPLE_SOURCE;
   }
 
   private async verifyTemplate(): Promise<void> {

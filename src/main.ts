@@ -1,5 +1,7 @@
-import { Plugin, WorkspaceLeaf } from "obsidian";
+import { Notice, Plugin, WorkspaceLeaf } from "obsidian";
 import { registerCitationTracker } from "./citation";
+import { BrowserOpenOptions, HighlightBrowserModal } from "./browser-modal";
+import { triggerExtension } from "./trigger";
 import {
   DEFAULT_SETTINGS,
   ReadwiseSearchSettings,
@@ -36,6 +38,9 @@ export default class ReadwiseSearchPlugin extends Plugin {
     registerCitationTracker(this);
     this.addSettingTab(new ReadwiseSearchSettingTab(this.app, this));
 
+    // 노트에서 시작 글자(기본 ,,)를 치면 큰 검색 창이 열린다
+    this.registerEditorExtension(triggerExtension(this));
+
     this.registerView(
       VIEW_TYPE_READWISE_SEARCH,
       (leaf) => new ReadwiseSearchView(leaf, this),
@@ -51,6 +56,12 @@ export default class ReadwiseSearchPlugin extends Plugin {
       callback: () => {
         void this.activateView("search");
       },
+    });
+
+    this.addCommand({
+      id: "readwise-quick-quote",
+      name: "큰 검색 창 열기 (하이라이트 찾아 인용)",
+      callback: () => this.openBrowser(),
     });
 
     this.addCommand({
@@ -101,6 +112,15 @@ export default class ReadwiseSearchPlugin extends Plugin {
     workspace.revealLeaf(leaf);
     const view = leaf.view;
     if (view instanceof ReadwiseSearchView) view.setTab(tab);
+  }
+
+  /** 큰 검색 창 — 명령·노트의 ,,·사이드 패널 "크게 보기"가 모두 여기로 온다 */
+  openBrowser(opts: BrowserOpenOptions = {}) {
+    if (this.cache.books.length === 0) {
+      new Notice("아직 동기화된 데이터가 없습니다. 설정에서 토큰 입력 후 '전체 동기화'를 실행해주세요.");
+      return;
+    }
+    new HighlightBrowserModal(this, opts).open();
   }
 
   notifyViews() {
