@@ -43,8 +43,14 @@ export interface ReadwiseSearchSettings {
   citationFormat: CitationFormat;
   /** citationFormat이 custom일 때 쓰는 템플릿 */
   citationTemplate: string;
-  /** 노트 안 자동완성 시작 글자 (빈 값 = 끔) */
+  /** 큰 검색 창 여는 글자 (빈 값 = 끔) */
   suggestTrigger: string;
+  /** 토큰 보관 위치 (v0.3.1) — settings: data.json(기본, 기기 간 그대로) · keychain: Obsidian 키체인(data.json에 안 남음, 기기마다 입력) */
+  tokenStorage: "settings" | "keychain";
+  /** 자동 동기화 간격(분), 0 = 끔 (v0.3.1) */
+  autoSyncMinutes: number;
+  /** Obsidian을 켤 때 한 번 동기화 (v0.3.1) */
+  syncOnStartup: boolean;
 }
 
 export const DEFAULT_SETTINGS: ReadwiseSearchSettings = {
@@ -60,6 +66,9 @@ export const DEFAULT_SETTINGS: ReadwiseSearchSettings = {
   citationFormat: "callout",
   citationTemplate: DEFAULT_CUSTOM_TEMPLATE,
   suggestTrigger: ",,",
+  tokenStorage: "settings",
+  autoSyncMinutes: 60,
+  syncOnStartup: true,
 };
 
 export class ReadwiseSearchSettingTab extends PluginSettingTab {
@@ -86,16 +95,30 @@ export class ReadwiseSearchSettingTab extends PluginSettingTab {
     tokenLink.setAttr("rel", "noopener");
     tokenDesc.appendText(" 에서 발급받아 아래에 붙여넣으세요.");
 
+    const keychain = this.plugin.keychainAvailable();
+    const inKeychain = this.plugin.settings.tokenStorage === "keychain";
+    let tokenInput: TextComponent | null = null;
     new Setting(containerEl)
       .setName("Readwise API 토큰")
       .setDesc(tokenDesc)
-      .addText((text) =>
+      .addText((text) => {
+        tokenInput = text;
+        // 강의 화면 공유 때 토큰이 보이지 않게 가려 둔다 (눈 단추로 잠깐 보기)
+        text.inputEl.type = "password";
         text
-          .setPlaceholder("Token...")
-          .setValue(this.plugin.settings.apiToken)
+          .setPlaceholder(inKeychain ? "토큰을 붙여넣으세요 (이 기기 키체인에 저장)" : "Token...")
+          .setValue(this.plugin.getToken())
           .onChange(async (value) => {
-            this.plugin.settings.apiToken = value.trim();
-            await this.plugin.persist();
+            await this.plugin.setToken(value);
+          });
+      })
+      .addExtraButton((btn) =>
+        btn
+          .setIcon("eye")
+          .setTooltip("토큰 보기·가리기")
+          .onClick(() => {
+            if (!tokenInput) return;
+            tokenInput.inputEl.type = tokenInput.inputEl.type === "password" ? "text" : "password";
           }),
       )
       .addButton((btn) =>
@@ -109,9 +132,9 @@ export class ReadwiseSearchSettingTab extends PluginSettingTab {
         btn
           .setButtonText("토큰 검증")
           .onClick(async () => {
-            const token = this.plugin.settings.apiToken;
+            const token = this.plugin.getToken();
             if (!token) {
-              new Notice("토큰을 먼저 입력해주세요.");
+              new Notice(this.plugin.tokenMissingMessage(), 8000);
               return;
             }
             const client = new ReadwiseClient(token);
@@ -125,6 +148,40 @@ export class ReadwiseSearchSettingTab extends PluginSettingTab {
             }
           }),
       );
+
+    // 키체인을 쓸 수 있거나, 다른 기기에서 키체인으로 바꿔 둔 설정이 넘어온 경우에만 보인다
+    if (keychain || inKeychain) {
+      const storageDesc = document.createDocumentFragment();
+      storageDesc.appendText("플러그인 설정 파일: 지금처럼 data.json에 저장되어 휴대폰 등 여러 기기에서 그대로 씁니다. ");
+      storageDesc.createEl("br");
+      storageDesc.appendText(
+        "Obsidian 키체인: 이 기기에만 암호화해 보관하고 data.json에는 남기지 않습니다. 볼트를 남과 공유하거나 백업·GitHub에 올린다면 이쪽이 안전합니다. 다른 기기에서는 토큰을 한 번 더 넣어야 합니다.",
+      );
+      new Setting(containerEl)
+        .setName("토큰 보관 위치")
+        .setDesc(storageDesc)
+        .addDropdown((dd) =>
+          dd
+            .addOption("settings", "플러그인 설정 파일 (기본)")
+            .addOption("keychain", keychain ? "Obsidian 키체인" : "Obsidian 키체인 (이 기기에서는 못 씀)")
+            .setValue(this.plugin.settings.tokenStorage)
+            .onChange(async (value) => {
+              if (value === "keychain" && !keychain) {
+                new Notice("이 기기의 Obsidian은 키체인을 지원하지 않습니다 (1.11.4 이상 필요).", 6000);
+                dd.setValue(this.plugin.settings.tokenStorage);
+                return;
+              }
+              await this.plugin.moveToken(value === "keychain" ? "keychain" : "settings");
+              new Notice(
+                value === "keychain"
+                  ? "토큰을 이 기기의 Obsidian 키체인으로 옮기고 data.json에서 지웠습니다. 휴대폰 등 다른 기기에서는 설정에서 토큰을 한 번 더 넣어 주세요."
+                  : "토큰을 플러그인 설정 파일(data.json)로 되돌렸습니다.",
+                9000,
+              );
+              this.display();
+            }),
+        );
+    }
 
     containerEl.createEl("h3", { text: "동기화" });
 
@@ -163,6 +220,32 @@ export class ReadwiseSearchSettingTab extends PluginSettingTab {
             this.renderStatus(status);
             this.plugin.notifyViews();
           }),
+      );
+
+    new Setting(containerEl)
+      .setName("자동 동기화")
+      .setDesc(
+        "Obsidian이 켜져 있는 동안 이 간격으로 바뀐 것만 받아옵니다. 새 하이라이트나 삭제 반영이 있을 때만 알림이 뜹니다. 처음 한 번은 위의 '전체 동기화'를 직접 눌러야 시작됩니다. (기본 1시간)",
+      )
+      .addDropdown((dd) =>
+        dd
+          .addOptions({ "0": "끔", "15": "15분마다", "30": "30분마다", "60": "1시간마다", "180": "3시간마다" })
+          .setValue(String(this.plugin.settings.autoSyncMinutes))
+          .onChange(async (value) => {
+            this.plugin.settings.autoSyncMinutes = Number(value);
+            await this.plugin.persist();
+            this.plugin.setupAutoSync();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("시작할 때 동기화")
+      .setDesc("Obsidian을 켜고 15초 뒤 한 번 바뀐 것만 받아옵니다. (기본 켬)")
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.syncOnStartup).onChange(async (value) => {
+          this.plugin.settings.syncOnStartup = value;
+          await this.plugin.persist();
+        }),
       );
 
     containerEl.createEl("h3", { text: "인용 넣기" });

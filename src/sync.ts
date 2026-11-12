@@ -19,11 +19,15 @@ export interface SyncResult {
   highlights: number;
   /** 이번 동기화로 목록에서 빠진(Readwise에서 지워진) 하이라이트 수 */
   deleted: number;
+  /** 이번 동기화로 새로 생긴 하이라이트 수 (자동 동기화 알림 기준) */
+  added: number;
   message: string;
 }
 
 export class SyncService {
   private running = false;
+  /** 자동 동기화에서 마지막으로 알린 오류 — 같은 오류를 반복해서 띄우지 않기 위해 */
+  private lastQuietError = "";
 
   constructor(private plugin: ReadwiseSearchPlugin) {}
 
@@ -31,35 +35,40 @@ export class SyncService {
     return this.running;
   }
 
-  async run(options: { full: boolean }): Promise<SyncResult> {
+  /**
+   * quiet = 자동 동기화(v0.3.1): 진행 알림 없이 돌고, 새 하이라이트·삭제 반영이 있을 때만 알린다.
+   * 오류는 인증 실패만 알리고(같은 내용은 한 번만), 네트워크 오류 등은 콘솔에만 남긴다.
+   */
+  async run(options: { full: boolean; quiet?: boolean }): Promise<SyncResult> {
+    const quiet = options.quiet === true;
     if (this.running) {
       const msg = "이미 동기화가 진행 중입니다.";
-      new Notice(msg);
+      if (!quiet) new Notice(msg);
       return fail(msg);
     }
 
-    const token = this.plugin.settings.apiToken;
+    const token = this.plugin.getToken();
     if (!token) {
-      const msg = "Readwise 토큰이 설정되지 않았습니다. 설정 탭에서 입력해주세요.";
-      new Notice(msg);
+      const msg = this.plugin.tokenMissingMessage();
+      if (!quiet) new Notice(msg, 8000);
       return fail(msg);
     }
 
     // 톰스톤 없이 만들어진 옛 캐시는 한 번 전체로 받아야 Readwise에서 지운 항목이 정리된다
     const needsUpgrade = this.plugin.settings.cacheVersion < CACHE_VERSION;
     const full = options.full || needsUpgrade;
-    if (needsUpgrade && !options.full && this.plugin.cache.books.length > 0) {
+    if (needsUpgrade && !options.full && this.plugin.cache.books.length > 0 && !quiet) {
       new Notice("삭제 반영을 위해 이번 한 번은 전체 동기화합니다.", 6000);
     }
 
     this.running = true;
     const client = new ReadwiseClient(token);
     const updatedAfter = full ? null : this.plugin.settings.lastSyncAt;
-    const progressNotice = new Notice("Readwise 동기화 시작...", 0);
+    const progressNotice = quiet ? null : new Notice("Readwise 동기화 시작...", 0);
 
     try {
       const fetched = await client.exportAll(updatedAfter, (info) => {
-        progressNotice.setMessage(
+        progressNotice?.setMessage(
           `Readwise 동기화 중... ${info.pages}p · ${info.books}권 · ${info.highlights}건`,
         );
       });
@@ -67,6 +76,7 @@ export class SyncService {
       const before = this.plugin.cache.books;
       const merged = this.prune(this.merge(before, fetched, full));
       const deleted = countNewlyDeleted(before, merged);
+      const added = countNewlyAdded(before, merged);
       this.plugin.cache.books = merged;
 
       const highlightCount = countAlive(merged);
@@ -80,13 +90,29 @@ export class SyncService {
 
       let msg = `Readwise 동기화 완료 · ${merged.length}권 · ${highlightCount}건`;
       if (deleted > 0) msg += ` · 삭제 반영 ${deleted}건`;
-      progressNotice.hide();
-      new Notice(msg);
-      return { ok: true, books: merged.length, highlights: highlightCount, deleted, message: msg };
+      progressNotice?.hide();
+      if (!quiet) {
+        new Notice(msg);
+      } else if (added > 0 || deleted > 0) {
+        const parts: string[] = [];
+        if (added > 0) parts.push(`새 하이라이트 ${added}건`);
+        if (deleted > 0) parts.push(`삭제 반영 ${deleted}건`);
+        new Notice(`Readwise 자동 동기화 · ${parts.join(" · ")}`);
+      }
+      this.lastQuietError = "";
+      return { ok: true, books: merged.length, highlights: highlightCount, deleted, added, message: msg };
     } catch (e) {
-      progressNotice.hide();
+      progressNotice?.hide();
       const msg = this.formatError(e);
-      new Notice(msg, 8000);
+      if (!quiet) {
+        new Notice(msg, 8000);
+      } else if (e instanceof ReadwiseAuthError && msg !== this.lastQuietError) {
+        // 자동 동기화에서는 토큰 문제만 알린다 — 같은 알림을 매시간 반복하지 않게 한 번만
+        new Notice(`Readwise 자동 동기화 · ${msg}`, 8000);
+        this.lastQuietError = msg;
+      } else {
+        console.warn("[A4P Readwise] 자동 동기화 실패:", msg);
+      }
       return fail(msg);
     } finally {
       this.running = false;
@@ -144,7 +170,16 @@ export class SyncService {
 }
 
 function fail(message: string): SyncResult {
-  return { ok: false, books: 0, highlights: 0, deleted: 0, message };
+  return { ok: false, books: 0, highlights: 0, deleted: 0, added: 0, message };
+}
+
+/** 직전 캐시에 없었는데 이번 결과에서 살아 있는 하이라이트 수 */
+function countNewlyAdded(before: ReadwiseBook[], after: ReadwiseBook[]): number {
+  const known = new Set<number>();
+  for (const b of before) for (const h of b.highlights ?? []) known.add(h.id);
+  let n = 0;
+  for (const b of after) for (const h of b.highlights ?? []) if (!h.is_deleted && !known.has(h.id)) n += 1;
+  return n;
 }
 
 /** 살아있는(톰스톤 아닌) 하이라이트 수 — 설정 탭 상태·완료 Notice 기준 */

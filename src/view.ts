@@ -3,6 +3,7 @@ import {
   ReadwiseApiError,
   ReadwiseAuthError,
   ReadwiseClient,
+  ReadwiseNoReviewError,
   ReadwiseRateLimitError,
 } from "./api";
 import { BookSuggestModal } from "./book-suggest-modal";
@@ -647,6 +648,22 @@ export class ReadwiseSearchView extends ItemView {
       if (ok) new Notice(`${this.dailyReview.highlights.length}개 인용 삽입 완료`);
     });
 
+    // 오늘의 복습 완료 표시 (v0.3.1 — 사용자가 허용한 유일한 Readwise 쓰기)
+    if (this.dailyReview && this.dailyReview.highlights.length > 0) {
+      if (this.dailyReview.review_completed) {
+        const done = el.createEl("button", { cls: "a4p-rw-daily-btn is-done" });
+        setIcon(done.createSpan(), "check");
+        done.createSpan({ text: "오늘 복습 완료됨" });
+        done.setAttr("disabled", "true");
+      } else {
+        const completeBtn = el.createEl("button", { cls: "a4p-rw-daily-btn is-cta" });
+        setIcon(completeBtn.createSpan(), "check-circle");
+        completeBtn.createSpan({ text: "오늘 복습 완료" });
+        completeBtn.setAttr("aria-label", "Readwise에 오늘의 Daily Review를 마쳤다고 기록합니다");
+        completeBtn.addEventListener("click", () => void this.completeDaily(completeBtn));
+      }
+    }
+
     if (this.dailyReview?.review_url) {
       const link = el.createEl("a", {
         text: "Readwise에서 열기",
@@ -662,8 +679,8 @@ export class ReadwiseSearchView extends ItemView {
     if (this.dailyLoading) return;
     if (!this.dailyStatusEl || !this.dailyResultsEl) return;
 
-    if (!this.plugin.settings.apiToken) {
-      this.dailyStatusEl.setText("설정에서 Readwise 토큰을 먼저 입력해주세요.");
+    if (!this.plugin.getToken()) {
+      this.dailyStatusEl.setText(this.plugin.tokenMissingMessage());
       this.dailyResultsEl.empty();
       this.dailyFetched = true;
       return;
@@ -674,7 +691,7 @@ export class ReadwiseSearchView extends ItemView {
     this.dailyResultsEl.empty();
 
     try {
-      const client = new ReadwiseClient(this.plugin.settings.apiToken);
+      const client = new ReadwiseClient(this.plugin.getToken());
       const review = await client.getDailyReview();
       this.dailyReview = review;
       this.dailyStatusEl.setText(
@@ -692,7 +709,28 @@ export class ReadwiseSearchView extends ItemView {
     }
   }
 
+  private async completeDaily(btn: HTMLButtonElement) {
+    if (!this.dailyReview) return;
+    btn.setAttr("disabled", "true");
+    try {
+      const client = new ReadwiseClient(this.plugin.getToken());
+      const res = await client.completeDailyReview();
+      this.dailyReview.review_completed = res.review_completed !== false;
+      this.dailyStatusEl?.setText(`${this.dailyReview.highlights.length}개 항목 · 오늘 review 완료됨`);
+      new Notice("Readwise에 오늘 복습 완료를 기록했습니다.");
+      this.renderDailyActions();
+    } catch (e) {
+      const msg =
+        e instanceof ReadwiseNoReviewError
+          ? "Readwise가 완료로 표시할 오늘의 review를 찾지 못했습니다. 여기 보이는 목록이 지난번 review일 수 있습니다 — Readwise 웹·앱에서 오늘의 Daily Review를 연 뒤 다시 눌러 주세요."
+          : this.formatDailyError(e);
+      new Notice(msg, 10000);
+      btn.removeAttribute("disabled");
+    }
+  }
+
   private formatDailyError(e: unknown): string {
+    if (e instanceof ReadwiseNoReviewError) return e.message;
     if (e instanceof ReadwiseAuthError) return `인증 실패: ${e.message}`;
     if (e instanceof ReadwiseRateLimitError)
       return `Rate limit. ${e.retryAfterSec}초 후 다시 시도해주세요.`;

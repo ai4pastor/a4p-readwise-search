@@ -356,6 +356,28 @@
   background: var(--interactive-hover);
 }
 
+/* 오늘 복습 완료 (v0.3.1) — 완료 전에는 권하는 단추라 강조색, 완료 뒤에는 흐리게 */
+.a4p-rw-daily-btn.is-cta {
+  background: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.a4p-rw-daily-btn.is-cta:hover {
+  background: var(--interactive-accent-hover);
+}
+
+.a4p-rw-daily-btn.is-done {
+  background: transparent;
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.a4p-rw-daily-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
 .a4p-rw-btn:active,
 .a4p-rw-insert:active,
 .a4p-rw-daily-btn:active {

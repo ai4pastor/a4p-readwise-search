@@ -10,6 +10,8 @@ export class ReadwiseRateLimitError extends Error {
   }
 }
 export class ReadwiseApiError extends Error {}
+/** Readwise에 (오늘의) Daily Review가 없음 — API가 404 "Review not found."로 알린다 */
+export class ReadwiseNoReviewError extends Error {}
 
 export type ProgressCallback = (info: {
   pages: number;
@@ -94,6 +96,9 @@ export class ReadwiseClient {
     if (res.status === 401) {
       throw new ReadwiseAuthError("토큰이 올바르지 않습니다.");
     }
+    if (res.status === 404) {
+      throw new ReadwiseNoReviewError("아직 Readwise에 Daily Review가 없습니다.");
+    }
     if (res.status === 429) {
       const retryAfter = parseInt(res.headers["retry-after"] ?? "60", 10);
       throw new ReadwiseRateLimitError(retryAfter);
@@ -106,7 +111,32 @@ export class ReadwiseClient {
     return res.json as DailyReview;
   }
 
-  private async request(url: string, method: "GET"): Promise<RequestUrlResponse> {
+  /** 오늘의 Daily Review를 완료로 표시한다 (v0.3.1 — 사용자가 허용한 유일한 Readwise 쓰기) */
+  async completeDailyReview(): Promise<{ review_id: number; review_completed: boolean }> {
+    if (!this.token) {
+      throw new ReadwiseAuthError("토큰이 설정되지 않았습니다.");
+    }
+    const res = await this.request(`${BASE_URL}/review/complete/`, "POST");
+    if (res.status === 401) {
+      throw new ReadwiseAuthError("토큰이 올바르지 않습니다.");
+    }
+    // 문서: review가 없으면 404 "Review not found." — 목록은 "가장 최근" review라 지난 review가 보여도 오늘 것은 없을 수 있다
+    if (res.status === 404) {
+      throw new ReadwiseNoReviewError("완료로 표시할 오늘의 Daily Review가 Readwise에 없습니다.");
+    }
+    if (res.status === 429) {
+      const retryAfter = parseInt(res.headers["retry-after"] ?? "60", 10);
+      throw new ReadwiseRateLimitError(retryAfter);
+    }
+    if (res.status < 200 || res.status >= 300) {
+      throw new ReadwiseApiError(
+        `복습 완료 표시 실패 (${res.status}): ${res.text?.slice(0, 200) ?? ""}`,
+      );
+    }
+    return res.json as { review_id: number; review_completed: boolean };
+  }
+
+  private async request(url: string, method: "GET" | "POST"): Promise<RequestUrlResponse> {
     return requestUrl({
       url,
       method,
