@@ -1,62 +1,13 @@
 /**
- * 한글 검색 도우미 (v0.4.0) — 초성 검색과 영문 자판으로 친 글자 복원.
+ * 한글 검색 도우미 (v0.4.0) — 영문 자판으로 친 글자 복원.
+ * (초성 검색은 사용자 결정으로 릴리스 전에 뺐다 — 2026-11-22)
  * 외부 라이브러리 없이 유니코드 계산만 쓴다 (수강생 배포 원칙: 추가 의존성 없음).
  */
 
 const SYLLABLE_FIRST = 0xac00;
-const SYLLABLE_LAST = 0xd7a3;
 const CHO = "ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ";
 const JUNG = "ㅏㅐㅑㅒㅓㅔㅕㅖㅗㅘㅙㅚㅛㅜㅝㅞㅟㅠㅡㅢㅣ";
 const JONG = ["", "ㄱ", "ㄲ", "ㄳ", "ㄴ", "ㄵ", "ㄶ", "ㄷ", "ㄹ", "ㄺ", "ㄻ", "ㄼ", "ㄽ", "ㄾ", "ㄿ", "ㅀ", "ㅁ", "ㅂ", "ㅄ", "ㅅ", "ㅆ", "ㅇ", "ㅈ", "ㅊ", "ㅋ", "ㅌ", "ㅍ", "ㅎ"];
-
-/** 두 글자 이상이 모두 초성 자음이면 초성 검색어로 본다 (한 글자는 너무 많이 걸린다) */
-export function isChoseongQuery(term: string): boolean {
-  return term.length >= 2 && /^[ㄱ-ㅎ]+$/.test(term);
-}
-
-/**
- * 완성형 한글만 초성으로 바꿔 이어 붙인다 — 띄어쓰기·문장부호는 건너뛴다 ("하나님 사랑" → "ㅎㄴㄴㅅㄹ").
- * map[k]는 k번째 초성이 원문의 몇 번째 글자에서 왔는지 (강조 표시용).
- */
-export function choseongIndex(text: string): { compact: string; map: number[] } {
-  let compact = "";
-  const map: number[] = [];
-  for (let i = 0; i < text.length; i++) {
-    const code = text.charCodeAt(i);
-    if (code >= SYLLABLE_FIRST && code <= SYLLABLE_LAST) {
-      compact += CHO[Math.floor((code - SYLLABLE_FIRST) / 588)];
-      map.push(i);
-    }
-  }
-  return { compact, map };
-}
-
-/**
- * 낱말 경계를 지킨 초성 — 한글이 아닌 글자는 띄어쓰기로 둔다 ("하는 나" → "ㅎㄴ ㄴ").
- * 초성 검색은 먼저 이걸로 한 낱말 안에서만 찾고, 없을 때만 compact(띄어쓰기 건너뜀)로 넓힌다.
- */
-export function choseongWords(text: string): string {
-  let out = "";
-  for (let i = 0; i < text.length; i++) {
-    const code = text.charCodeAt(i);
-    out += code >= SYLLABLE_FIRST && code <= SYLLABLE_LAST ? CHO[Math.floor((code - SYLLABLE_FIRST) / 588)] : " ";
-  }
-  return out;
-}
-
-/** 원문에서 초성 검색어가 맞은 범위들 [시작, 끝) */
-export function choseongRanges(text: string, term: string): Array<{ start: number; end: number }> {
-  const { compact, map } = choseongIndex(text);
-  const ranges: Array<{ start: number; end: number }> = [];
-  let from = 0;
-  while (true) {
-    const k = compact.indexOf(term, from);
-    if (k === -1) break;
-    ranges.push({ start: map[k], end: map[k + term.length - 1] + 1 });
-    from = k + term.length;
-  }
-  return ranges;
-}
 
 // 두벌식 자판: 영문 키 → 자모 (대문자는 쌍자음·ㅒ·ㅖ, 나머지 대문자는 소문자와 같다)
 const KEY_TO_JAMO: Record<string, string> = {

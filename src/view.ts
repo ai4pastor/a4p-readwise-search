@@ -164,7 +164,7 @@ export class ReadwiseSearchView extends ItemView {
 
     this.inputEl = inputWrap.createEl("input", {
       cls: "a4p-rw-search-input",
-      attr: { type: "text", placeholder: "검색 — 초성 ㅎㄴㄴ · \"구절\" · -빼기 · 책: · #태그" },
+      attr: { type: "text", placeholder: "검색 — \"구절\" · -빼기 · 책: · #태그" },
     });
     this.inputEl.value = this.currentQuery;
     this.inputEl.addEventListener("input", () => {

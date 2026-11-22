@@ -1,5 +1,5 @@
 import { ActiveFilters } from "./filters";
-import { choseongIndex, choseongWords, isChoseongQuery, qwertyToHangul } from "./korean";
+import { qwertyToHangul } from "./korean";
 import { ParsedQuery, parseQuery } from "./query";
 import { ReadwiseBook, ReadwiseHighlight } from "./types";
 
@@ -88,68 +88,23 @@ function haystackOf(f: HitFields): string {
   return `${f.text}\n${f.note}\n${f.bookTitle}\n${f.bookAuthor}\n${f.tagsLower}\n${f.bookTagsLower}`;
 }
 
-interface ChoseongFields {
-  text: string;
-  note: string;
-  title: string;
-  author: string;
-}
-
-// 초성 문자열은 하이라이트·책마다 한 번만 만든다 (타이핑할 때마다 다시 세지 않게)
-// words = 낱말 경계를 지킨 것("ㅎㄴ ㄴ"), loose = 띄어쓰기를 건너뛴 것("ㅎㄴㄴ")
-const highlightChoseong = new WeakMap<ReadwiseHighlight, { words: [string, string]; loose: [string, string] }>();
-const bookChoseong = new WeakMap<ReadwiseBook, { words: [string, string]; loose: [string, string] }>();
-
-function choseongOf(h: ReadwiseHighlight, book: ReadwiseBook, loose: boolean): ChoseongFields {
-  let hc = highlightChoseong.get(h);
-  if (!hc) {
-    const text = h.text ?? "";
-    const note = h.note ?? "";
-    hc = {
-      words: [choseongWords(text), choseongWords(note)],
-      loose: [choseongIndex(text).compact, choseongIndex(note).compact],
-    };
-    highlightChoseong.set(h, hc);
-  }
-  let bc = bookChoseong.get(book);
-  if (!bc) {
-    const title = book.title ?? "";
-    const author = book.author ?? "";
-    bc = {
-      words: [choseongWords(title), choseongWords(author)],
-      loose: [choseongIndex(title).compact, choseongIndex(author).compact],
-    };
-    bookChoseong.set(book, bc);
-  }
-  const [text, note] = loose ? hc.loose : hc.words;
-  const [title, author] = loose ? bc.loose : bc.words;
-  return { text, note, title, author };
-}
-
-/** 한 하이라이트를 검사하는 데 필요한 것 — 초성은 초성 검색어가 있을 때만 만든다 */
+/** 한 하이라이트를 검사하는 데 필요한 것 */
 interface Candidate {
   h: ReadwiseHighlight;
   book: ReadwiseBook;
   f: HitFields;
   haystack: string;
-  /** 초성 검색어를 띄어쓰기를 건너뛰고 맞출지 (한 낱말 안에서 못 찾았을 때) */
-  looseChoseong: boolean;
 }
 
 function termMatches(term: string, c: Candidate): boolean {
-  if (isChoseongQuery(term)) {
-    const ch = choseongOf(c.h, c.book, c.looseChoseong);
-    return ch.text.includes(term) || ch.note.includes(term) || ch.title.includes(term) || ch.author.includes(term);
-  }
   return c.haystack.includes(term);
 }
 
 function fieldMatches(field: keyof ParsedQuery["fields"], value: string, c: Candidate): boolean {
   if (field === "tag") return c.f.tagNames.some((t) => t.includes(value));
-  const ch = isChoseongQuery(value) ? choseongOf(c.h, c.book, false) : null;
-  if (field === "book") return ch ? ch.title.includes(value) : c.f.bookTitle.includes(value);
-  if (field === "author") return ch ? ch.author.includes(value) : c.f.bookAuthor.includes(value);
-  return ch ? ch.note.includes(value) : c.f.note.includes(value);
+  if (field === "book") return c.f.bookTitle.includes(value);
+  if (field === "author") return c.f.bookAuthor.includes(value);
+  return c.f.note.includes(value);
 }
 
 /** 칸 지정(책:·저자:·태그:·메모:)과 빼기(-)는 어느 단계에서든 지킨다 */
@@ -158,22 +113,13 @@ function passesQuery(q: ParsedQuery, c: Candidate): boolean {
     if (!q.fields[field].every((v) => fieldMatches(field, v, c))) return false;
     if (q.excludeFields[field].some((v) => fieldMatches(field, v, c))) return false;
   }
-  // 빼기는 한 낱말 안의 초성으로만 판단한다 (낱말 경계를 넘는 우연한 일치로 너무 많이 빼지 않게)
-  return !q.excludes.some((v) => termMatches(v, { ...c, looseChoseong: false }));
+  return !q.excludes.some((v) => termMatches(v, c));
 }
 
 function scoreTerms(terms: string[], c: Candidate): number {
   const f = c.f;
   let score = 0;
   for (const t of terms) {
-    if (isChoseongQuery(t)) {
-      const ch = choseongOf(c.h, c.book, c.looseChoseong);
-      if (ch.text.includes(t)) score += 3;
-      if (ch.note.includes(t)) score += 2;
-      if (ch.title.includes(t)) score += 1;
-      if (ch.author.includes(t)) score += 1;
-      continue;
-    }
     if (f.text.includes(t)) score += 3;
     if (f.note.includes(t)) score += 2;
     if (f.bookTitle.includes(t)) score += 1;
@@ -190,10 +136,9 @@ function forEachMatchingCandidate(
   filters: ActiveFilters,
   hasNote: ((highlightId: number) => boolean) | undefined,
   visit: (c: Candidate) => void,
-  looseChoseong = false,
 ): void {
   forEachCandidate(books, filters, hasNote, (h, book, f) => {
-    const c: Candidate = { h, book, f, haystack: haystackOf(f), looseChoseong };
+    const c: Candidate = { h, book, f, haystack: haystackOf(f) };
     if (passesQuery(q, c)) visit(c);
   });
 }
@@ -205,20 +150,12 @@ function matchAll(
   q: ParsedQuery,
   filters: ActiveFilters,
   hasNote: ((highlightId: number) => boolean) | undefined,
-  looseChoseong = false,
 ): SearchHit[] {
   const hits: SearchHit[] = [];
-  forEachMatchingCandidate(
-    books,
-    q,
-    filters,
-    hasNote,
-    (c) => {
-      if (!terms.every((t) => termMatches(t, c))) return;
-      hits.push({ highlight: c.h, book: c.book, score: scoreTerms(terms, c) });
-    },
-    looseChoseong,
-  );
+  forEachMatchingCandidate(books, q, filters, hasNote, (c) => {
+    if (!terms.every((t) => termMatches(t, c))) return;
+    hits.push({ highlight: c.h, book: c.book, score: scoreTerms(terms, c) });
+  });
   return hits;
 }
 
@@ -287,10 +224,6 @@ export interface SearchOutcome {
 
 /** 본문·메모에서 맞았는지 (일부 일치 순위: 책 제목에서만 맞은 것은 뒤로) */
 function contentMatches(term: string, c: Candidate): boolean {
-  if (isChoseongQuery(term)) {
-    const ch = choseongOf(c.h, c.book, c.looseChoseong);
-    return ch.text.includes(term) || ch.note.includes(term);
-  }
   return c.f.text.includes(term) || c.f.note.includes(term);
 }
 
@@ -316,11 +249,7 @@ function runStages(
   ): SearchOutcome => ({ hits, mode, terms: [...terms, ...fieldTerms], query: q, converted });
 
   const terms = q.terms;
-  let exact = matchAll(books, terms, q, filters, hasNote);
-  // 초성은 한 낱말 안에서 먼저 찾고, 없으면 띄어쓰기를 건너뛰고 ("ㅎㄴㄴㅅㄹ" → "하나님 사랑")
-  if (exact.length === 0 && terms.some(isChoseongQuery)) {
-    exact = matchAll(books, terms, q, filters, hasNote, true);
-  }
+  const exact = matchAll(books, terms, q, filters, hasNote);
   if (exact.length > 0 || terms.length === 0) return done(exact, "all", terms);
 
   // 한영 전환을 잊고 친 낱말 — 영문만으로 된 낱말이 두 음절 이상 온전한 한글이 될 때만 바꾼다
@@ -339,8 +268,8 @@ function runStages(
     if (hits.length > 0) return done(hits, "qwerty", hangulTerms, converted);
   }
 
-  // 따옴표 구절과 초성 검색어는 조사를 떼지 않는다
-  const stems = terms.map((t) => (t.includes(" ") || isChoseongQuery(t) ? t : stripKoreanEnding(t)));
+  // 따옴표 구절은 조사를 떼지 않는다
+  const stems = terms.map((t) => (t.includes(" ") ? t : stripKoreanEnding(t)));
   if (stems.some((s, i) => s !== terms[i])) {
     const stemmed = matchAll(books, stems, q, filters, hasNote);
     if (stemmed.length > 0) return done(stemmed, "stem", stems);
