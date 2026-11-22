@@ -1647,3 +1647,53 @@
   color: var(--text-normal);
   border-color: var(--background-modifier-border-hover);
 }
+
+/* ───────── 관련 탭 (v0.5.0) — 지금 쓰는 노트와 닿는 밑줄 ───────── */
+
+.a4p-rw-related-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.a4p-rw-related-head:empty,
+.a4p-rw-related-terms:empty {
+  display: none;
+}
+
+.a4p-rw-related-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.a4p-rw-related-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.a4p-rw-related-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.a4p-rw-related-terms {
+  align-items: center;
+}
+
+/* 끈 낱말 */
+.a4p-rw-tag-toggle.a4p-rw-term.is-off {
+  background: transparent;
+  color: var(--text-faint);
+  text-decoration: line-through;
+}
+
+.a4p-rw-term-note {
+  cursor: default;
+  color: var(--text-faint);
+}

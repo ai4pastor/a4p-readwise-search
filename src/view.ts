@@ -1,4 +1,13 @@
-import { ItemView, Notice, setIcon, WorkspaceLeaf } from "obsidian";
+import {
+  debounce,
+  getAllTags,
+  ItemView,
+  Notice,
+  parseFrontMatterAliases,
+  setIcon,
+  TFile,
+  WorkspaceLeaf,
+} from "obsidian";
 import {
   ReadwiseApiError,
   ReadwiseAuthError,
@@ -27,14 +36,15 @@ import {
 } from "./filters";
 import { formatRelative, renderTextWithMarks } from "./hit-render";
 import type ReadwiseSearchPlugin from "./main";
-import type { NoteIndexChange } from "./note-index";
+import { NoteIndexChange, parseHighlightId } from "./note-index";
 import { describeQuery } from "./query";
+import { extractTerms, findRelated } from "./related";
 import { highlightTime, SearchHit, searchWithFallback, SortMode } from "./search";
 import { DailyReview, DailyReviewHighlight } from "./types";
 
 export const VIEW_TYPE_READWISE_SEARCH = "a4p-readwise-search-view";
 
-export type ReadwiseTab = "search" | "daily";
+export type ReadwiseTab = "search" | "related" | "daily";
 
 const DEBOUNCE_MS = 150;
 const SNIPPET_MAX = 280;
@@ -65,6 +75,16 @@ export class ReadwiseSearchView extends ItemView {
   /** 태그 섹션 펼침 여부 — 기본 접힘(공간 확보, 2026-09-20 사용자 요청). 세션 상태, 설정에 저장 안 함 */
   private tagsOpen = false;
   private sortMode: SortMode;
+
+  // 관련 탭 (v0.5.0) — 지금 쓰는 노트와 닿는 밑줄
+  private relatedHeadEl: HTMLDivElement | null = null;
+  private relatedTermsEl: HTMLDivElement | null = null;
+  private relatedStatusEl: HTMLDivElement | null = null;
+  private relatedResultsEl: HTMLDivElement | null = null;
+  private relatedFile: TFile | null = null;
+  /** 노트마다 사용자가 끈 낱말 (세션 상태) */
+  private relatedSkip = new Map<string, Set<string>>();
+  private scheduleRelated = debounce(() => this.runRelated(), 600, true);
 
   // Daily tab state
   private dailyStatusEl: HTMLDivElement | null = null;
@@ -103,6 +123,17 @@ export class ReadwiseSearchView extends ItemView {
 
     // 노트 생성·삭제·이동 시 해당 카드의 버튼만 제자리에서 갱신 (뷰가 닫히면 자동 해제)
     this.registerEvent(this.plugin.noteIndex.onChange((ids) => this.refreshNoteButtons(ids)));
+    // 관련 탭: 다른 노트를 열거나 지금 노트의 제목·소제목·태그가 바뀌면 다시 찾는다 (탭이 켜져 있을 때만)
+    this.registerEvent(
+      this.app.workspace.on("file-open", () => {
+        if (this.activeTab === "related") this.scheduleRelated();
+      }),
+    );
+    this.registerEvent(
+      this.app.metadataCache.on("changed", (file) => {
+        if (this.activeTab === "related" && file.path === this.relatedFile?.path) this.scheduleRelated();
+      }),
+    );
 
     this.renderTabs();
     this.renderActiveTab();
@@ -110,6 +141,7 @@ export class ReadwiseSearchView extends ItemView {
 
   async onClose() {
     if (this.debounceTimer !== null) window.clearTimeout(this.debounceTimer);
+    this.scheduleRelated.cancel();
   }
 
   /** 설정의 fontScale(%)을 패널 CSS 변수로 반영 — 슬라이더 변경 시에도 호출됨 */
@@ -134,6 +166,7 @@ export class ReadwiseSearchView extends ItemView {
     this.tabsEl.empty();
     const tabs: { key: ReadwiseTab; label: string; icon: string }[] = [
       { key: "search", label: "검색", icon: "search" },
+      { key: "related", label: "관련", icon: "link" },
       { key: "daily", label: "Daily Review", icon: "calendar-days" },
     ];
     for (const t of tabs) {
@@ -149,6 +182,7 @@ export class ReadwiseSearchView extends ItemView {
   private renderActiveTab() {
     this.bodyEl.empty();
     if (this.activeTab === "search") this.renderSearchTab();
+    else if (this.activeTab === "related") this.renderRelatedTab();
     else this.renderDailyTab();
   }
 
@@ -457,17 +491,15 @@ export class ReadwiseSearchView extends ItemView {
   private renderSearchResults(hits: SearchHit[]) {
     if (!this.searchResultsEl) return;
     this.searchResultsEl.empty();
-    for (const hit of hits) this.renderSearchCard(hit);
+    for (const hit of hits) this.renderSearchCard(this.searchResultsEl, hit, this.markTerms);
   }
 
-  private renderSearchCard(hit: SearchHit) {
-    if (!this.searchResultsEl) return;
-    const card = this.searchResultsEl.createDiv({ cls: "a4p-rw-card" });
+  /** 하이라이트 카드 — 검색 탭과 관련 탭이 같은 모양을 쓴다 */
+  private renderSearchCard(parent: HTMLElement, hit: SearchHit, terms: string[]) {
+    const card = parent.createDiv({ cls: "a4p-rw-card" });
 
     this.attachDrag(card, () => formatHitCitation(hit, citationOptions(this.plugin.settings)));
     this.addDragHandle(card);
-
-    const terms = this.markTerms;
 
     const meta = card.createDiv({ cls: "a4p-rw-meta" });
     const titleRow = meta.createDiv({ cls: "a4p-rw-meta-title-row" });
@@ -564,6 +596,8 @@ export class ReadwiseSearchView extends ItemView {
     if (this.activeTab === "search") {
       this.renderFilters();
       this.runSearch();
+    } else if (this.activeTab === "related") {
+      this.runRelated();
     }
   }
 
@@ -591,7 +625,9 @@ export class ReadwiseSearchView extends ItemView {
       applyNoteButtonState(btn, exists);
       if (!exists && btn.closest(".a4p-rw-card")?.hasAttribute("data-deleted")) dropTombstone = true;
     });
-    if (dropTombstone && this.activeTab === "search") this.runSearch();
+    if (!dropTombstone) return;
+    if (this.activeTab === "search") this.runSearch();
+    else if (this.activeTab === "related") this.runRelated();
   }
 
   /** 설정의 기본 정렬이 바뀌면 열린 패널에도 즉시 반영 */
@@ -601,6 +637,131 @@ export class ReadwiseSearchView extends ItemView {
       this.renderFilters();
       this.runSearch();
     }
+  }
+
+  // ───────── Related tab (v0.5.0) ─────────
+
+  private renderRelatedTab() {
+    const root = this.bodyEl;
+    this.relatedHeadEl = root.createDiv({ cls: "a4p-rw-related-head" });
+    this.relatedTermsEl = root.createDiv({ cls: "a4p-rw-tag-row a4p-rw-related-terms" });
+    this.relatedStatusEl = root.createDiv({ cls: "a4p-rw-status" });
+    this.relatedResultsEl = root.createDiv({ cls: "a4p-rw-results" });
+    this.runRelated();
+  }
+
+  private renderRelatedEmpty(icon: string, title: string, sub: string) {
+    if (!this.relatedResultsEl) return;
+    this.relatedResultsEl.empty();
+    const empty = this.relatedResultsEl.createDiv({ cls: "a4p-rw-empty" });
+    setIcon(empty.createDiv({ cls: "a4p-rw-empty-icon" }), icon);
+    empty.createEl("p", { cls: "a4p-rw-empty-title", text: title });
+    empty.createEl("p", { cls: "a4p-rw-empty-sub", text: sub });
+  }
+
+  /**
+   * 지금 쓰는(마지막으로 쓰던) 노트의 제목·소제목·태그에서 낱말을 뽑아, 그 낱말이 든 밑줄을 보여 준다.
+   * 낱말 칩을 누르면 그 낱말을 빼고 다시 찾는다. 뜻이 비슷한 다른 낱말까지 찾는 의미 검색은 아니다.
+   */
+  private runRelated() {
+    if (this.activeTab !== "related") return;
+    const headEl = this.relatedHeadEl;
+    const termsEl = this.relatedTermsEl;
+    const statusEl = this.relatedStatusEl;
+    const resultsEl = this.relatedResultsEl;
+    if (!headEl || !termsEl || !statusEl || !resultsEl) return;
+
+    // 사이드 패널을 눌러도 마지막으로 쓰던 노트가 기준으로 남는다
+    const active = this.app.workspace.getActiveFile();
+    if (active && active.extension === "md") this.relatedFile = active;
+    const file = this.relatedFile;
+    const stillThere = file ? this.app.vault.getAbstractFileByPath(file.path) instanceof TFile : false;
+
+    headEl.empty();
+    termsEl.empty();
+    statusEl.setText("");
+    if (this.plugin.cache.books.length === 0) {
+      this.renderRelatedEmpty(
+        "book-marked",
+        "아직 동기화된 데이터가 없습니다",
+        "설정 → A4P Readwise Search 에서 토큰 입력 후 '전체 동기화'를 실행해주세요.",
+      );
+      return;
+    }
+    if (!file || !stillThere) {
+      this.relatedFile = null;
+      this.renderRelatedEmpty(
+        "file-text",
+        "노트를 열어 주세요",
+        "지금 쓰는 노트의 제목·소제목·태그와 닿는 밑줄을 여기에 보여 줍니다.",
+      );
+      return;
+    }
+
+    setIcon(headEl.createSpan({ cls: "a4p-rw-related-icon" }), "file-text");
+    headEl.createSpan({ cls: "a4p-rw-related-title", text: file.basename });
+    headEl.setAttr("aria-label", "이 노트의 제목·소제목·태그에서 뽑은 낱말로 찾습니다");
+
+    const cache = this.app.metadataCache.getFileCache(file);
+    const terms = extractTerms({
+      title: file.basename,
+      headings: (cache?.headings ?? []).filter((h) => h.level <= 3).map((h) => h.heading),
+      tags: cache ? getAllTags(cache) ?? [] : [],
+      aliases: parseFrontMatterAliases(cache?.frontmatter ?? null) ?? [],
+    });
+    if (terms.length === 0) {
+      this.renderRelatedEmpty(
+        "type",
+        "찾을 낱말이 없습니다",
+        "노트 제목이나 소제목(##)·태그를 적으면 그 낱말로 밑줄을 찾습니다.",
+      );
+      return;
+    }
+
+    const skip = this.relatedSkip.get(file.path) ?? new Set<string>();
+    const outcome = findRelated(this.plugin.cache.books, terms, (id) => this.plugin.noteIndex.has(id), {
+      // 이 노트가 하이라이트 메모 노트면 그 하이라이트 자신은 뺀다
+      excludeHighlightId: parseHighlightId(cache?.frontmatter?.highlight_id),
+      skip,
+    });
+
+    // 찾는 데 쓴 낱말 — 누르면 끄고 켠다 (태그 칩과 같은 모양)
+    const shown = new Set([...outcome.used, ...skip]);
+    for (const { term } of terms) {
+      if (!shown.has(term)) continue;
+      const off = skip.has(term);
+      const chip = termsEl.createSpan({ cls: "a4p-rw-tag-toggle a4p-rw-term", text: term });
+      chip.toggleClass("is-off", off);
+      chip.setAttr("aria-label", off ? "이 낱말로 다시 찾기" : "이 낱말은 빼고 찾기");
+      chip.addEventListener("click", () => {
+        if (off) skip.delete(term);
+        else skip.add(term);
+        this.relatedSkip.set(file.path, skip);
+        this.runRelated();
+      });
+    }
+    // 못 쓴 낱말은 개수만 보이고 까닭은 말풍선으로
+    const unused = outcome.common.length + outcome.missing.length;
+    if (unused > 0) {
+      const parts: string[] = [];
+      if (outcome.common.length) parts.push(`너무 흔해서 뺀 낱말: ${outcome.common.join(", ")}`);
+      if (outcome.missing.length) parts.push(`서재에 없는 낱말: ${outcome.missing.join(", ")}`);
+      termsEl
+        .createSpan({ cls: "a4p-rw-tag-more a4p-rw-term-note", text: `그 밖의 낱말 ${unused}개` })
+        .setAttr("aria-label", parts.join(" · "));
+    }
+
+    resultsEl.empty();
+    if (outcome.hits.length === 0) {
+      this.renderRelatedEmpty(
+        "search",
+        "닿는 밑줄이 없습니다",
+        "소제목이나 태그를 더 적으면 찾을 낱말이 늘어납니다.",
+      );
+      return;
+    }
+    statusEl.setText(`닿는 밑줄 ${outcome.hits.length}건 · 맞은 낱말이 많은 순`);
+    for (const hit of outcome.hits) this.renderSearchCard(resultsEl, hit, outcome.used);
   }
 
   // ───────── Daily tab ─────────

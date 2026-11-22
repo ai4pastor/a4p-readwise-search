@@ -79,6 +79,14 @@ export default class ReadwiseSearchPlugin extends Plugin {
     });
 
     this.addCommand({
+      id: "readwise-open-related",
+      name: "지금 쓰는 노트와 닿는 밑줄 보기",
+      callback: () => {
+        void this.activateView("related");
+      },
+    });
+
+    this.addCommand({
       id: "readwise-sync",
       name: "동기화 (증분)",
       callback: async () => {
