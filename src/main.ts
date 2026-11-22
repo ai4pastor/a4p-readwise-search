@@ -20,6 +20,7 @@ import {
 export const KEYCHAIN_ENTRY_ID = "a4p-readwise-token";
 /** 시작할 때 동기화는 노트 인덱스가 준비되고 앱이 다 뜬 뒤에 */
 const STARTUP_SYNC_DELAY_MS = 15_000;
+const QUOTE_FONT_CLASSES = ["a4p-rw-font-serif", "a4p-rw-font-text", "a4p-rw-font-ui"];
 
 interface PersistedState {
   settings: ReadwiseSearchSettings;
@@ -35,6 +36,7 @@ export default class ReadwiseSearchPlugin extends Plugin {
 
   async onload() {
     await this.loadState();
+    this.applyQuoteFont();
 
     // highlight_id → 노트 경로 인덱스 (카드 버튼 "노트 생성"/"노트 열기" 판정, 삭제·이동 즉시 반영)
     this.noteIndex = new HighlightNoteIndex(this.app, () => this.settings.noteRootFolder);
@@ -72,9 +74,17 @@ export default class ReadwiseSearchPlugin extends Plugin {
 
     this.addCommand({
       id: "readwise-open-daily",
-      name: "Daily Review 열기",
+      name: "오늘의 복습 열기 (Daily Review)",
       callback: () => {
         void this.activateView("daily");
+      },
+    });
+
+    this.addCommand({
+      id: "readwise-open-related",
+      name: "지금 쓰는 노트와 닿는 밑줄 보기",
+      callback: () => {
+        void this.activateView("related");
       },
     });
 
@@ -99,7 +109,15 @@ export default class ReadwiseSearchPlugin extends Plugin {
     });
   }
 
-  onunload() {}
+  onunload() {
+    document.body.removeClass(...QUOTE_FONT_CLASSES);
+  }
+
+  /** 밑줄 글꼴 설정을 body 클래스로 반영한다 (styles.css가 --a4p-rw-quote-font를 바꾼다) */
+  applyQuoteFont() {
+    document.body.removeClass(...QUOTE_FONT_CLASSES);
+    document.body.addClass(`a4p-rw-font-${this.settings.quoteFont}`);
+  }
 
   async loadState() {
     const raw = ((await this.loadData()) ?? {}) as Partial<PersistedState>;

@@ -53,7 +53,11 @@ export interface ReadwiseSearchSettings {
   syncOnStartup: boolean;
   /** 큰 검색 창의 최근 검색어 — 최근 것이 앞 (v0.4.0) */
   recentQueries: string[];
+  /** 밑줄 본문 글꼴 (v0.5.0) — serif: 명조(기본) · text: 노트 본문 글꼴 · ui: 화면 글꼴 */
+  quoteFont: QuoteFont;
 }
+
+export type QuoteFont = "serif" | "text" | "ui";
 
 export const DEFAULT_SETTINGS: ReadwiseSearchSettings = {
   apiToken: "",
@@ -72,6 +76,7 @@ export const DEFAULT_SETTINGS: ReadwiseSearchSettings = {
   autoSyncMinutes: 60,
   syncOnStartup: true,
   recentQueries: [],
+  quoteFont: "serif",
 };
 
 export class ReadwiseSearchSettingTab extends PluginSettingTab {
@@ -376,8 +381,28 @@ export class ReadwiseSearchSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
+      .setName("밑줄 글꼴")
+      .setDesc(
+        "밑줄 본문을 어떤 글꼴로 보여 줄지 고릅니다. 명조가 어색하게 보이는 기기에서는 '노트 본문 글꼴'로 바꿔 보세요. (기본 명조)",
+      )
+      .addDropdown((dd) =>
+        dd
+          .addOptions({
+            serif: "명조 (책 같은 느낌)",
+            text: "노트 본문 글꼴",
+            ui: "화면 글꼴",
+          })
+          .setValue(this.plugin.settings.quoteFont)
+          .onChange(async (value) => {
+            this.plugin.settings.quoteFont = value as QuoteFont;
+            await this.plugin.persist();
+            this.plugin.applyQuoteFont();
+          }),
+      );
+
+    new Setting(containerEl)
       .setName("결과 카드 글자 크기")
-      .setDesc("하이라이트 카드의 제목·본문 글자 크기입니다. (기본 90%)")
+      .setDesc("사이드 패널 카드의 밑줄·출처 글자 크기입니다. (기본 90%)")
       .addSlider((slider) =>
         slider
           .setLimits(70, 110, 5)

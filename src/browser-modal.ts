@@ -1,19 +1,36 @@
-import { Editor, EditorPosition, Modal, Notice, Platform, setIcon } from "obsidian";
+import {
+  Component,
+  Editor,
+  EditorPosition,
+  MarkdownRenderer,
+  Modal,
+  Notice,
+  Platform,
+  setIcon,
+} from "obsidian";
+import { createBookNote } from "./book-note";
 import {
   citationOptions,
   formatHitCitation,
   insertCitationText,
   replaceWithCitation,
 } from "./citation";
-import {
-  CITATION_FORMAT_LABELS,
-  CitationFormat,
-  joinCitations,
-  locationLabel,
-} from "./citation-format";
+import { CitationFormat, joinCitations, locationLabel } from "./citation-format";
+import { renderCover } from "./cover";
 import type { ActiveFilters } from "./filters";
 import { createHighlightNoteFromHit } from "./highlight-note";
 import { formatRelative, renderTextWithMarks, snippetAround } from "./hit-render";
+import {
+  calendarWeeks,
+  collectStats,
+  dayKey,
+  formatDayLabel,
+  heatLevel,
+  LibraryStats,
+  monthCounts,
+  pickRandomHit,
+  recentBooks,
+} from "./library";
 import type ReadwiseSearchPlugin from "./main";
 import { describeQuery } from "./query";
 import {
@@ -39,10 +56,12 @@ export interface BrowserOpenOptions {
   /** 사이드 패널의 "크게 보기"에서 넘어온 필터 */
   filters?: ActiveFilters;
   target?: BrowserTarget;
+  /** 책 한 권 보기로 바로 열 책 (v0.5.0 — 사이드 패널 카드의 책 제목) */
+  bookId?: number;
 }
 
 type Period = "all" | "week" | "month" | "year";
-type FacetKey = "category" | "book" | "tag" | "state" | "period";
+type FacetKey = "category" | "book" | "tag" | "state" | "period" | "date";
 
 interface FacetCounts {
   categories: Map<string, number>;
@@ -51,6 +70,13 @@ interface FacetCounts {
   memo: number;
   noted: number;
   favorite: number;
+}
+
+/** 읽기 달력·달 막대에서 고른 날짜 범위 ("YYYY-MM-DD" 양 끝 포함) */
+interface DateFilter {
+  from: string;
+  to: string;
+  label: string;
 }
 
 const PERIODS: Array<[Period, string, number]> = [
@@ -65,6 +91,12 @@ const SORTS: Array<[SortMode, string]> = [
   ["book", "책별"],
   ["oldest", "오래된순"],
 ];
+const FORMATS: Array<[CitationFormat, string, string]> = [
+  ["callout", "콜아웃", "콜아웃 상자"],
+  ["inline", "짧게", "짧은 인용 — “…” (저자, 『책』)"],
+  ["footnote", "각주", "각주 — “…”^[저자, 『책』.]"],
+  ["custom", "내 형식", "설정에서 만든 사용자 정의 템플릿"],
+];
 const CATEGORY_LABELS: Record<string, string> = {
   books: "책",
   articles: "아티클",
@@ -75,13 +107,20 @@ const CATEGORY_LABELS: Record<string, string> = {
 const CATEGORY_ORDER = ["books", "articles", "tweets", "podcasts", "supplementals"];
 /** 목록은 이만큼씩 그린다 ("N건 더 보기") */
 const PAGE = 60;
-const BOOKS_VISIBLE = 10;
-const TAGS_VISIBLE = 12;
+const BOOKS_VISIBLE = 8;
+const TAGS_VISIBLE = 10;
 const DEBOUNCE_MS = 120;
 /** 창 폭이 이보다 좁으면 한 단으로 접고 필터·미리보기를 덮개로 연다 */
 const NARROW_PX = 900;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const RECENT_MAX = 8;
+/** 서재 홈 */
+const HOME_BOOKS = 6;
+const HOME_MONTHS = 12;
+/** 읽기 달력 한 칸의 폭(칸 13 + 틈 3) — 가운데 폭에 맞춰 주 수를 정한다 */
+const HEAT_STEP_PX = 16;
+const HEAT_MIN_WEEKS = 12;
+const HEAT_MAX_WEEKS = 53;
 /** "검색 문법" 줄의 예시 — 누르면 검색칸에 붙는다 (v0.4.0) */
 const SEARCH_EXAMPLES: Array<[string, string]> = [
   ['"하나님의 은혜"', "띄어쓰기까지 그대로"],
@@ -94,9 +133,11 @@ const SEARCH_EXAMPLES: Array<[string, string]> = [
 ];
 
 /**
- * 큰 검색 창 (v0.3.0, 시안 A — 2026-11-12 사용자 선택).
+ * 큰 검색 창 (v0.3.0 시안 A·3단 → v0.5.0 「서재」 디자인).
  * 왼쪽 필터(건수) · 가운데 결과 목록 · 오른쪽 미리보기(전문·메모·넣을 모양·같은 책 앞뒤 밑줄).
- * 노트에서 ,,를 치거나 명령·사이드 패널 "크게 보기"로 연다.
+ * 검색칸과 필터가 비어 있으면 가운데 맨 위에 서재 홈(다시 만난 밑줄·요즘 읽는 것·달별 밑줄 수·읽기 달력),
+ * 책을 하나만 고르면 책 한 권 보기(읽은 순서 + 노트 한 장으로 내보내기)가 된다.
+ * 노트에서 ,,를 치거나 명령·사이드 패널 "크게 보기"·카드의 책 제목으로 연다.
  */
 export class HighlightBrowserModal extends Modal {
   private plugin: ReadwiseSearchPlugin;
@@ -113,9 +154,13 @@ export class HighlightBrowserModal extends Modal {
   private onlyNoted = false;
   private onlyFavorite = false;
   private period: Period = "all";
+  private dateFilter: DateFilter | null = null;
   private bookQuery = "";
   private showAllBooks = false;
   private showAllTags = false;
+  /** 책 한 권 보기로 들어오기 전의 정렬 — 나갈 때 되돌린다 */
+  private sortBeforeBook: SortMode | null = null;
+  private openBookId: number | undefined;
 
   private list: SearchHit[] = [];
   private mode: MatchMode = "all";
@@ -127,11 +172,19 @@ export class HighlightBrowserModal extends Modal {
   private selected = new Map<number, SearchHit>();
   private shown = PAGE;
   private byBook = new Map<number, ReadwiseHighlight[]>();
+  private stats: LibraryStats = { total: 0, bookCount: 0, byDay: new Map() };
+  /** 서재 홈의 "다시 만난 밑줄" */
+  private again: SearchHit | null = null;
+  /** 넣을 모양을 마크다운 기호 그대로 볼지 */
+  private showRaw = false;
+  private previewRenderer: Component | null = null;
   private timer: number | null = null;
   private resizeObserver: ResizeObserver | null = null;
 
   private inputEl!: HTMLInputElement;
+  private searchWrapEl!: HTMLElement;
   private bookInputEl!: HTMLInputElement;
+  private countEl!: HTMLElement;
   private sortEl!: HTMLElement;
   private statusEl!: HTMLElement;
   private listEl!: HTMLElement;
@@ -148,6 +201,7 @@ export class HighlightBrowserModal extends Modal {
     this.target = opts.target;
     this.query = opts.query ?? "";
     this.sort = plugin.settings.defaultSort;
+    this.openBookId = opts.bookId;
     opts.filters?.categories?.forEach((c) => this.categories.add(c));
     opts.filters?.bookIds?.forEach((id) => this.bookIds.add(id));
     opts.filters?.tagNames?.forEach((t) => this.tagNames.add(t));
@@ -163,9 +217,11 @@ export class HighlightBrowserModal extends Modal {
   onOpen() {
     this.modalEl.addClass("a4p-rw-browser");
     this.indexBooks();
+    this.again = pickRandomHit(this.plugin.cache.books, (id) => this.plugin.noteIndex.has(id));
     this.buildLayout();
     this.registerKeys();
-    this.refresh();
+    if (this.openBookId !== undefined) this.openBook(this.openBookId);
+    else this.refresh();
     this.focusInput();
     // Obsidian이 창을 연 직후 포커스를 창 자체로 옮기므로 다음 틱에 검색칸으로 다시 가져온다
     window.setTimeout(() => this.focusInput(), 0);
@@ -181,13 +237,16 @@ export class HighlightBrowserModal extends Modal {
     if (this.timer !== null) window.clearTimeout(this.timer);
     this.rememberQuery();
     this.resizeObserver?.disconnect();
+    this.previewRenderer?.unload();
+    this.previewRenderer = null;
     this.contentEl.empty();
   }
 
   // ───────── 데이터 ─────────
 
-  /** 같은 책의 앞뒤 밑줄을 찾기 위한 책별 목록 (위치 → 하이라이트한 시각 순) */
+  /** 같은 책의 앞뒤 밑줄을 찾기 위한 책별 목록 (위치 → 하이라이트한 시각 순) + 서재 집계 */
   private indexBooks() {
+    this.byBook.clear();
     for (const book of this.plugin.cache.books) {
       const items = (book.highlights ?? []).filter(
         (h) => !h.is_deleted || this.plugin.noteIndex.has(h.id),
@@ -199,6 +258,7 @@ export class HighlightBrowserModal extends Modal {
       );
       this.byBook.set(book.user_book_id, items);
     }
+    this.stats = collectStats(this.plugin.cache.books, (id) => this.plugin.noteIndex.has(id));
   }
 
   /** 필터·정렬·카드를 누른 뒤에도 바로 타이핑과 ↑↓·Enter가 되게 검색칸으로 돌아온다 */
@@ -209,6 +269,11 @@ export class HighlightBrowserModal extends Modal {
   }
 
   private refresh() {
+    // 책 한 권 보기에서 나왔으면(책 필터를 풀었으면) 들어오기 전의 정렬로 되돌린다
+    if (this.sortBeforeBook !== null && this.bookIds.size !== 1) {
+      this.sort = this.sortBeforeBook;
+      this.sortBeforeBook = null;
+    }
     const outcome = queryAll(this.plugin.cache.books, this.query, (id) =>
       this.plugin.noteIndex.has(id),
     );
@@ -254,6 +319,10 @@ export class HighlightBrowserModal extends Modal {
       if (this.onlyFavorite && !h.is_favorite) return false;
     }
     if (skip !== "period" && !this.inPeriod(h)) return false;
+    if (skip !== "date" && this.dateFilter) {
+      const key = dayKey(highlightTime(h));
+      if (!key || key < this.dateFilter.from || key > this.dateFilter.to) return false;
+    }
     return true;
   }
 
@@ -304,11 +373,12 @@ export class HighlightBrowserModal extends Modal {
       this.onlyMemo ||
       this.onlyNoted ||
       this.onlyFavorite ||
-      this.period !== "all"
+      this.period !== "all" ||
+      this.dateFilter !== null
     );
   }
 
-  private resetFilters() {
+  private clearFilters() {
     this.categories.clear();
     this.bookIds.clear();
     this.tagNames.clear();
@@ -316,7 +386,45 @@ export class HighlightBrowserModal extends Modal {
     this.onlyNoted = false;
     this.onlyFavorite = false;
     this.period = "all";
+    this.dateFilter = null;
+  }
+
+  private resetFilters() {
+    this.clearFilters();
     this.refresh();
+  }
+
+  /** 검색어도 필터도 없는 처음 화면 — 서재 홈을 보인다 */
+  private isHome(): boolean {
+    return this.query.trim() === "" && !this.hasActiveFilters();
+  }
+
+  /** 책 한 권 보기 — 그 책의 밑줄만, 읽은 순서로 */
+  private openBook(bookId: number) {
+    if (!this.byBook.has(bookId)) {
+      this.refresh();
+      return;
+    }
+    if (this.sortBeforeBook === null) this.sortBeforeBook = this.sort;
+    this.clearFilters();
+    this.bookIds.add(bookId);
+    this.sort = "book";
+    this.setQuery("");
+    this.current = null;
+    this.refresh();
+    this.listEl.scrollTop = 0;
+  }
+
+  private closeBook() {
+    this.bookIds.clear();
+    this.refresh();
+    this.listEl.scrollTop = 0;
+  }
+
+  private setQuery(q: string) {
+    this.query = q;
+    this.inputEl.value = q;
+    this.searchWrapEl.toggleClass("has-value", q.length > 0);
   }
 
   // ───────── 뼈대 ─────────
@@ -327,19 +435,17 @@ export class HighlightBrowserModal extends Modal {
     root.addClass("a4p-rw-b-root");
 
     const head = root.createDiv({ cls: "a4p-rw-b-head" });
-    const title = head.createDiv({ cls: "a4p-rw-b-title" });
-    setIcon(title.createSpan({ cls: "a4p-rw-b-title-icon" }), "book-open");
-    title.createSpan({ text: "Readwise 하이라이트" });
-    const total = this.plugin.cache.books.reduce((n, b) => n + (b.highlights?.length ?? 0), 0);
-    title.createSpan({ cls: "a4p-rw-b-pill", text: total.toLocaleString() });
+    head.createSpan({ cls: "a4p-rw-b-title", text: "서재" });
+    this.countEl = head.createSpan({ cls: "a4p-rw-b-count" });
+    this.renderCount();
     if (this.target) {
       head.createSpan({ cls: "a4p-rw-b-hint", text: "고른 밑줄이 노트의 ,, 자리에 들어갑니다" });
     }
     const syncBtn = head.createEl("button", { cls: "a4p-rw-b-ghost a4p-rw-b-sync" });
-    setIcon(syncBtn.createSpan(), "refresh-cw");
-    syncBtn.createSpan({ text: "동기화" });
+    setIcon(syncBtn.createSpan({ cls: "a4p-rw-b-sync-icon" }), "refresh-cw");
+    const syncLabel = syncBtn.createSpan({ text: this.syncLabel() });
     syncBtn.setAttr("aria-label", "Readwise에서 바뀐 것만 받아오기");
-    syncBtn.addEventListener("click", () => void this.runSync(syncBtn));
+    syncBtn.addEventListener("click", () => void this.runSync(syncBtn, syncLabel));
 
     const body = root.createDiv({ cls: "a4p-rw-b-body" });
     this.buildFacets(body.createDiv({ cls: "a4p-rw-b-facets" }));
@@ -370,16 +476,26 @@ export class HighlightBrowserModal extends Modal {
     this.selectionEl = foot.createDiv({ cls: "a4p-rw-b-selection" });
   }
 
+  private renderCount() {
+    this.countEl.setText(
+      `밑줄 ${this.stats.total.toLocaleString()} · ${this.stats.bookCount.toLocaleString()}권`,
+    );
+  }
+
+  private syncLabel(): string {
+    const when = formatRelative(this.plugin.settings.lastSyncAt);
+    return when ? `${when} 동기화` : "동기화";
+  }
+
   private buildFacets(el: HTMLElement) {
-    const section = (title: string, icon?: string) => {
+    const section = (title: string) => {
       const sec = el.createDiv({ cls: "a4p-rw-b-fsec" });
       const h = sec.createDiv({ cls: "a4p-rw-b-fsec-title" });
-      if (icon) setIcon(h.createSpan({ cls: "a4p-rw-b-fsec-icon" }), icon);
       h.createSpan({ text: title });
       return { sec, h };
     };
     const category = section("종류");
-    const book = section("책", "book");
+    const book = section("책");
     this.bookCountEl = book.h.createSpan({ cls: "a4p-rw-b-fsec-count" });
     this.bookInputEl = book.sec.createEl("input", {
       cls: "a4p-rw-b-fsearch",
@@ -389,15 +505,15 @@ export class HighlightBrowserModal extends Modal {
       this.bookQuery = this.bookInputEl.value.trim();
       this.renderBookFacet();
     });
-    const tag = section("태그", "tag");
+    const tag = section("태그");
     const state = section("상태");
-    const period = section("기간", "calendar");
+    const period = section("기간");
     this.facetEls = {
       category: category.sec.createDiv({ cls: "a4p-rw-b-fitems" }),
       book: book.sec.createDiv({ cls: "a4p-rw-b-fitems" }),
       tag: tag.sec.createDiv({ cls: "a4p-rw-b-fitems" }),
       state: state.sec.createDiv({ cls: "a4p-rw-b-fitems" }),
-      period: period.sec.createDiv({ cls: "a4p-rw-b-seg a4p-rw-b-seg-full" }),
+      period: period.sec.createDiv({ cls: "a4p-rw-b-pills" }),
     };
   }
 
@@ -405,18 +521,18 @@ export class HighlightBrowserModal extends Modal {
     const bar = center.createDiv({ cls: "a4p-rw-b-toolbar" });
     const row = bar.createDiv({ cls: "a4p-rw-b-row" });
     const wrap = row.createDiv({ cls: "a4p-rw-b-search" });
+    this.searchWrapEl = wrap;
     setIcon(wrap.createSpan({ cls: "a4p-rw-b-search-icon" }), "search");
     this.inputEl = wrap.createEl("input", {
-      attr: { type: "text", placeholder: "밑줄 검색 — 띄어 쓰면 모두 포함 (예: 고난 소망)" },
+      attr: { type: "text", placeholder: "밑줄 찾기 — 띄어 쓰면 모두 포함 (예: 고난 소망)" },
     });
     this.inputEl.value = this.query;
     const clear = wrap.createSpan({ cls: "a4p-rw-b-clear" });
     setIcon(clear, "x");
     clear.setAttr("aria-label", "검색어 지우기");
-    const syncClear = () => wrap.toggleClass("has-value", this.inputEl.value.length > 0);
-    syncClear();
+    wrap.toggleClass("has-value", this.inputEl.value.length > 0);
     this.inputEl.addEventListener("input", () => {
-      syncClear();
+      wrap.toggleClass("has-value", this.inputEl.value.length > 0);
       this.renderRecent();
       if (this.timer !== null) window.clearTimeout(this.timer);
       this.timer = window.setTimeout(() => {
@@ -426,24 +542,24 @@ export class HighlightBrowserModal extends Modal {
       }, DEBOUNCE_MS);
     });
     clear.addEventListener("click", () => {
-      this.inputEl.value = "";
-      syncClear();
-      this.query = "";
+      this.setQuery("");
       this.refresh();
       this.inputEl.focus();
+    });
+    const helpBtn = wrap.createEl("button", { cls: "a4p-rw-b-iconbtn a4p-rw-b-help-btn" });
+    setIcon(helpBtn, "help-circle");
+    helpBtn.setAttr("aria-label", "검색 문법 — 예시를 누르면 검색칸에 붙습니다");
+    helpBtn.addEventListener("click", () => {
+      this.helpEl.toggleClass("is-open", !this.helpEl.hasClass("is-open"));
+      this.focusInput();
     });
     // 좁은 창에서만 보이는 필터 열기 단추
     const filterBtn = row.createEl("button", { cls: "a4p-rw-b-ghost a4p-rw-b-filter-toggle" });
     setIcon(filterBtn.createSpan(), "sliders-horizontal");
     filterBtn.createSpan({ text: "필터" });
-    filterBtn.addEventListener("click", () => this.modalEl.toggleClass("show-facets", !this.modalEl.hasClass("show-facets")));
-    const helpBtn = row.createEl("button", { cls: "a4p-rw-b-ghost" });
-    setIcon(helpBtn.createSpan(), "help-circle");
-    helpBtn.createSpan({ text: "검색 문법" });
-    helpBtn.addEventListener("click", () => {
-      this.helpEl.toggleClass("is-open", !this.helpEl.hasClass("is-open"));
-      this.focusInput();
-    });
+    filterBtn.addEventListener("click", () =>
+      this.modalEl.toggleClass("show-facets", !this.modalEl.hasClass("show-facets")),
+    );
 
     this.helpEl = bar.createDiv({ cls: "a4p-rw-b-help" });
     for (const [example, label] of SEARCH_EXAMPLES) {
@@ -454,8 +570,8 @@ export class HighlightBrowserModal extends Modal {
     }
     this.recentEl = bar.createDiv({ cls: "a4p-rw-b-recent" });
 
-    const row2 = bar.createDiv({ cls: "a4p-rw-b-row" });
-    this.sortEl = row2.createDiv({ cls: "a4p-rw-b-seg" });
+    const row2 = bar.createDiv({ cls: "a4p-rw-b-bar" });
+    this.sortEl = row2.createDiv({ cls: "a4p-rw-b-sort" });
     this.statusEl = row2.createDiv({ cls: "a4p-rw-b-status" });
   }
 
@@ -475,11 +591,18 @@ export class HighlightBrowserModal extends Modal {
     count: number,
     on: boolean,
     onClick: () => void,
-    opts: { icon?: string; dotCls?: string; title?: string } = {},
+    opts: { icon?: string; dotCls?: string; cover?: ReadwiseBook; title?: string } = {},
   ) {
     const btn = parent.createEl("button", { cls: "a4p-rw-b-fitem" });
     if (on) btn.addClass("is-on");
     if (opts.dotCls) btn.createSpan({ cls: `a4p-rw-b-dot ${opts.dotCls}` });
+    if (opts.cover) {
+      renderCover(
+        btn,
+        { title: opts.cover.title, category: opts.cover.category, sourceUrl: opts.cover.source_url },
+        "sm",
+      );
+    }
     if (opts.icon) setIcon(btn.createSpan({ cls: "a4p-rw-b-fitem-icon" }), opts.icon);
     btn.createSpan({ cls: "a4p-rw-b-fitem-label", text: label });
     btn.createSpan({ cls: "a4p-rw-b-fitem-count", text: count.toLocaleString() });
@@ -529,7 +652,7 @@ export class HighlightBrowserModal extends Modal {
       this.facetItem(el, book.title || "제목 없음", count, this.bookIds.has(id), () => {
         toggle(this.bookIds, id);
         this.refresh();
-      }, { dotCls: `is-${book.category}`, title: book.author ? `${book.title} — ${book.author}` : book.title });
+      }, { cover: book, title: book.author ? `${book.title} — ${book.author}` : book.title });
     }
     if (matched.length === 0) el.createDiv({ cls: "a4p-rw-b-fempty", text: q ? "맞는 책이 없습니다" : "없음" });
     if (!q && matched.length > BOOKS_VISIBLE) {
@@ -554,7 +677,7 @@ export class HighlightBrowserModal extends Modal {
     );
     const limit = this.showAllTags ? 300 : TAGS_VISIBLE;
     for (const [tag, n] of tags.slice(0, limit)) {
-      this.facetItem(el, `#${tag}`, n, this.tagNames.has(tag), () => {
+      this.facetItem(el, `# ${tag}`, n, this.tagNames.has(tag), () => {
         toggle(this.tagNames, tag);
         this.refresh();
       });
@@ -614,6 +737,8 @@ export class HighlightBrowserModal extends Modal {
       if (forced && s !== "relevance") btn.setAttr("aria-label", "일부만 맞는 결과는 맞은 낱말 수 순으로 보여 줍니다");
       btn.addEventListener("click", () => {
         this.sort = s;
+        // 책 한 권 보기에서 정렬을 직접 바꿨으면 나갈 때 되돌리지 않는다
+        this.sortBeforeBook = null;
         this.refresh();
       });
     }
@@ -625,13 +750,26 @@ export class HighlightBrowserModal extends Modal {
     el.createEl("b", { text: `${this.list.length.toLocaleString()}건` });
     if (this.mode === "qwerty" && this.outcome) {
       const pairs = this.outcome.converted.map((c) => `${c.from} → ${c.to}`).join(", ");
-      el.createSpan({ cls: "a4p-rw-b-mode", text: ` · 영문 자판을 한글로 바꿔 찾음 (${pairs})` });
+      el.createSpan({ cls: "a4p-rw-b-mode", text: `영문 자판을 한글로 바꿔 찾음 (${pairs})` });
     }
-    if (this.mode === "stem") el.createSpan({ cls: "a4p-rw-b-mode", text: " · 조사를 뗀 낱말로 찾음" });
+    if (this.mode === "stem") el.createSpan({ cls: "a4p-rw-b-mode", text: "조사를 뗀 낱말로 찾음" });
     if (this.mode === "partial") {
-      el.createSpan({ cls: "a4p-rw-b-mode", text: " · 모든 낱말이 든 결과가 없어 일부만 맞는 결과" });
+      el.createSpan({ cls: "a4p-rw-b-mode", text: "모든 낱말이 든 결과가 없어 일부만 맞는 결과" });
     }
-    if (this.outcome?.query.hasSyntax) el.appendText(` · 조건: ${describeQuery(this.outcome.query)}`);
+    if (this.outcome?.query.hasSyntax) {
+      el.createSpan({ cls: "a4p-rw-b-cond", text: `조건: ${describeQuery(this.outcome.query)}` });
+    }
+    if (this.dateFilter) {
+      const chip = el.createEl("button", { cls: "a4p-rw-b-datechip" });
+      setIcon(chip.createSpan(), "calendar");
+      chip.createSpan({ text: this.dateFilter.label });
+      setIcon(chip.createSpan({ cls: "a4p-rw-b-datechip-x" }), "x");
+      chip.setAttr("aria-label", "이 날짜 조건 풀기");
+      chip.addEventListener("click", () => {
+        this.dateFilter = null;
+        this.refresh();
+      });
+    }
     const parts: string[] = [];
     if (this.categories.size) parts.push(`종류 ${this.categories.size}`);
     if (this.bookIds.size) parts.push(`책 ${this.bookIds.size}`);
@@ -640,8 +778,8 @@ export class HighlightBrowserModal extends Modal {
     if (this.onlyNoted) parts.push("노트 만든 것");
     if (this.onlyFavorite) parts.push("즐겨찾기");
     if (this.period !== "all") parts.push(PERIODS.find(([p]) => p === this.period)?.[1] ?? "");
-    if (parts.length) {
-      el.appendText(` · 필터: ${parts.join(" · ")}`);
+    if (parts.length) el.createSpan({ cls: "a4p-rw-b-cond", text: `필터: ${parts.join(" · ")}` });
+    if (this.hasActiveFilters()) {
       const reset = el.createEl("button", { cls: "a4p-rw-b-reset", text: "필터 초기화" });
       reset.addEventListener("click", () => this.resetFilters());
     }
@@ -699,6 +837,12 @@ export class HighlightBrowserModal extends Modal {
       this.renderEmpty(el, "book-marked", "아직 동기화된 데이터가 없습니다", "설정 → A4P Readwise Search 에서 토큰 입력 후 '전체 동기화'를 실행해주세요.");
       return;
     }
+    if (this.isHome()) {
+      this.renderHome(el);
+      el.createDiv({ cls: "a4p-rw-b-list-label", text: this.sort === "recent" ? "최근 밑줄" : "모든 밑줄" });
+    } else if (this.bookIds.size === 1) {
+      this.renderBookHead(el, Array.from(this.bookIds)[0]);
+    }
     if (this.list.length === 0) {
       this.renderEmpty(
         el,
@@ -737,13 +881,221 @@ export class HighlightBrowserModal extends Modal {
     box.createDiv({ cls: "a4p-rw-b-empty-sub", text: sub });
   }
 
+  // ───────── 서재 홈 (v0.5.0) ─────────
+
+  private renderHome(parent: HTMLElement) {
+    const home = parent.createDiv({ cls: "a4p-rw-home" });
+    this.renderAgainTile(home.createDiv({ cls: "a4p-rw-home-tile is-again" }));
+
+    // 요즘 읽는 것 — 최근에 밑줄 친 책·글
+    const reading = home.createDiv({ cls: "a4p-rw-home-tile is-reading" });
+    reading.createDiv({ cls: "a4p-rw-home-label", text: "요즘 읽는 것" });
+    const shelf = reading.createDiv({ cls: "a4p-rw-home-shelf" });
+    const books = recentBooks(this.plugin.cache.books, HOME_BOOKS, (id) => this.plugin.noteIndex.has(id));
+    for (const book of books) {
+      const btn = shelf.createEl("button", { cls: "a4p-rw-home-book" });
+      renderCover(btn, { title: book.title, category: book.category, sourceUrl: book.source_url }, "md");
+      btn.setAttr("aria-label", `${book.title || "제목 없음"}${book.author ? ` — ${book.author}` : ""} · 밑줄 ${this.byBook.get(book.user_book_id)?.length ?? 0}개`);
+      btn.addEventListener("click", () => this.openBook(book.user_book_id));
+    }
+
+    // 달별 밑줄 수 — 막대를 누르면 그 달만
+    const months = monthCounts(this.stats.byDay, HOME_MONTHS);
+    const monthTile = home.createDiv({ cls: "a4p-rw-home-tile is-month" });
+    const thisMonth = months[months.length - 1]?.count ?? 0;
+    monthTile.createDiv({ cls: "a4p-rw-home-label", text: `이번 달 밑줄 ${thisMonth.toLocaleString()}개` });
+    const bars = monthTile.createDiv({ cls: "a4p-rw-home-bars" });
+    const maxMonth = Math.max(1, ...months.map((m) => m.count));
+    if (months.every((m) => m.count === 0)) {
+      bars.addClass("is-empty");
+      bars.setText(`최근 ${HOME_MONTHS}달 동안 친 밑줄이 없습니다.`);
+    }
+    months.forEach((m, i) => {
+      if (bars.hasClass("is-empty")) return;
+      const bar = bars.createEl("button", { cls: "a4p-rw-home-bar" });
+      if (i === months.length - 1) bar.addClass("is-now");
+      bar.createSpan({ cls: "a4p-rw-home-bar-fill" }).style.height = `${Math.max(m.count > 0 ? 6 : 0, (m.count / maxMonth) * 100)}%`;
+      bar.createSpan({ cls: "a4p-rw-home-bar-label", text: String(m.month) });
+      bar.setAttr("aria-label", `${m.year}년 ${m.month}월 · 밑줄 ${m.count.toLocaleString()}개`);
+      if (m.count > 0) {
+        bar.addEventListener("click", () => {
+          this.dateFilter = { from: `${m.key}-01`, to: `${m.key}-31`, label: `${m.year}년 ${m.month}월` };
+          this.refresh();
+        });
+      } else {
+        bar.setAttr("disabled", "true");
+      }
+    });
+
+    // 읽기 달력 — 칸을 누르면 그날의 밑줄만
+    const calTile = home.createDiv({ cls: "a4p-rw-home-tile is-calendar" });
+    // 가운데 폭에 들어가는 만큼의 주를 보인다 (타일 안쪽 여백 32px)
+    const room = Math.floor(((calTile.clientWidth || 448) - 32 + 3) / HEAT_STEP_PX);
+    const weekCount = Math.min(HEAT_MAX_WEEKS, Math.max(HEAT_MIN_WEEKS, room));
+    const weeks = calendarWeeks(this.stats.byDay, weekCount);
+    const days = weeks.flat();
+    const activeDays = days.filter((d) => d.count > 0).length;
+    calTile.createDiv({
+      cls: "a4p-rw-home-label",
+      text: `읽기 달력 · 최근 ${weekCount}주 가운데 ${activeDays}일`,
+    });
+    const grid = calTile.createDiv({ cls: "a4p-rw-heat" });
+    const maxDay = Math.max(1, ...days.map((d) => d.count));
+    for (const week of weeks) {
+      const col = grid.createDiv({ cls: "a4p-rw-heat-col" });
+      for (const day of week) {
+        const cell = col.createEl("button", { cls: `a4p-rw-heat-cell is-l${heatLevel(day.count, maxDay)}` });
+        if (day.future) {
+          cell.addClass("is-future");
+          cell.setAttr("disabled", "true");
+          continue;
+        }
+        cell.setAttr("aria-label", `${formatDayLabel(day.key)} · 밑줄 ${day.count}개`);
+        if (day.count === 0) {
+          cell.setAttr("disabled", "true");
+          continue;
+        }
+        cell.addEventListener("click", () => {
+          this.dateFilter = { from: day.key, to: day.key, label: formatDayLabel(day.key) };
+          this.refresh();
+        });
+      }
+    }
+  }
+
+  /** 다시 만난 밑줄 — 서재에서 무작위로 하나. 누르면 미리보기로, 섞기 단추로 다른 것 */
+  private renderAgainTile(tile: HTMLElement) {
+    tile.empty();
+    const head = tile.createDiv({ cls: "a4p-rw-home-label" });
+    head.createSpan({ text: "다시 만난 밑줄" });
+    const shuffle = head.createEl("button", { cls: "a4p-rw-b-iconbtn" });
+    setIcon(shuffle, "shuffle");
+    shuffle.setAttr("aria-label", "다른 밑줄 보기");
+    shuffle.addEventListener("click", (evt) => {
+      evt.stopPropagation();
+      this.again = pickRandomHit(
+        this.plugin.cache.books,
+        (id) => this.plugin.noteIndex.has(id),
+        Math.random,
+        this.again?.highlight.id,
+      );
+      this.renderAgainTile(tile);
+      if (this.again) this.setCurrent(this.again, false);
+      this.focusInput();
+    });
+    const hit = this.again;
+    if (!hit) {
+      tile.createDiv({ cls: "a4p-rw-home-quote", text: "아직 밑줄이 없습니다." });
+      return;
+    }
+    const text = (hit.highlight.text ?? "").replace(/\s+/g, " ").trim();
+    tile.createDiv({ cls: "a4p-rw-home-quote", text });
+    const cite = tile.createDiv({ cls: "a4p-rw-home-cite" });
+    renderCover(cite, { title: hit.book.title, category: hit.book.category, sourceUrl: hit.book.source_url }, "sm");
+    cite.createSpan({
+      text: [hit.book.author?.trim(), hit.book.title || "제목 없음"].filter(Boolean).join(" · "),
+    });
+    tile.setAttr("aria-label", "눌러서 미리보기로 — Enter를 누르면 인용으로 들어갑니다");
+    tile.onclick = () => {
+      this.setCurrent(hit, false);
+      if (this.modalEl.hasClass("is-narrow")) this.modalEl.addClass("show-preview");
+      else this.focusInput();
+    };
+  }
+
+  // ───────── 책 한 권 보기 (v0.5.0) ─────────
+
+  private renderBookHead(parent: HTMLElement, bookId: number) {
+    const book = this.plugin.cache.books.find((b) => b.user_book_id === bookId);
+    if (!book) return;
+    const all = this.byBook.get(bookId) ?? [];
+    const head = parent.createDiv({ cls: "a4p-rw-bookhead" });
+    renderCover(head, { title: book.title, category: book.category, sourceUrl: book.source_url }, "lg");
+    const info = head.createDiv({ cls: "a4p-rw-bookhead-info" });
+    info.createDiv({ cls: "a4p-rw-bookhead-title", text: book.title || "제목 없음" });
+    const memos = all.filter((h) => (h.note ?? "").trim()).length;
+    info.createDiv({
+      cls: "a4p-rw-bookhead-sub",
+      text: [
+        book.author?.trim(),
+        CATEGORY_LABELS[book.category] ?? book.category,
+        `밑줄 ${all.length}개`,
+        memos ? `메모 ${memos}개` : "",
+      ].filter(Boolean).join(" · "),
+    });
+    const acts = info.createDiv({ cls: "a4p-rw-bookhead-acts" });
+    const exportBtn = acts.createEl("button", { cls: "a4p-rw-b-ghost" });
+    setIcon(exportBtn.createSpan(), "file-plus");
+    exportBtn.createSpan({ text: "노트 한 장으로" });
+    exportBtn.setAttr(
+      "aria-label",
+      `이 책의 밑줄 ${all.length}개를 읽은 순서대로 노트 한 장에 모읍니다 (이미 있으면 그 노트를 엽니다)`,
+    );
+    exportBtn.addEventListener("click", () => {
+      this.close();
+      void createBookNote(this.app, this.plugin.settings, book, all);
+    });
+    if (book.readwise_url) {
+      const link = acts.createEl("a", { cls: "a4p-rw-b-ghost", href: book.readwise_url });
+      setIcon(link.createSpan(), "external-link");
+      link.createSpan({ text: "Readwise" });
+      link.setAttr("target", "_blank");
+      link.setAttr("rel", "noopener");
+    }
+    const close = acts.createEl("button", { cls: "a4p-rw-b-ghost" });
+    setIcon(close.createSpan(), "x");
+    close.createSpan({ text: "책 보기 닫기" });
+    close.addEventListener("click", () => this.closeBook());
+  }
+
+  // ───────── 목록 카드 ─────────
+
   private renderCard(hit: SearchHit) {
     const h = hit.highlight;
     const book = hit.book;
-    const card = this.listEl.createDiv({ cls: `a4p-rw-bcard is-${book.category}` });
+    const card = this.listEl.createDiv({ cls: "a4p-rw-bcard" });
     card.dataset.id = String(h.id);
     if (this.current?.highlight.id === h.id) card.addClass("is-current");
     if (this.selected.has(h.id)) card.addClass("is-selected");
+    if (h.is_deleted) card.addClass("is-deleted");
+
+    // 책 한 권 보기에서는 표지·제목이 줄마다 되풀이되지 않게 그 책 안의 순번만 보인다
+    const bookView = this.bookIds.size === 1;
+    if (bookView) {
+      const pos = (this.byBook.get(book.user_book_id) ?? []).findIndex((x) => x.id === h.id);
+      card.addClass("is-bookview");
+      card.createSpan({ cls: "a4p-rw-bcard-num", text: pos >= 0 ? String(pos + 1) : "·" });
+    } else {
+      renderCover(card, { title: book.title, category: book.category, sourceUrl: book.source_url }, "md");
+    }
+
+    const body = card.createDiv({ cls: "a4p-rw-bcard-body" });
+    renderTextWithMarks(
+      body.createDiv({ cls: "a4p-rw-bcard-text" }),
+      snippetAround(h.text ?? "", this.terms, 260),
+      this.terms,
+    );
+
+    const src = body.createDiv({ cls: "a4p-rw-bcard-src" });
+    if (!bookView) {
+      const title = src.createSpan({ cls: "a4p-rw-bcard-title" });
+      renderTextWithMarks(title, book.title || "제목 없음", this.terms);
+      title.setAttr("aria-label", "이 책의 밑줄을 읽은 순서대로 보기");
+      title.addEventListener("click", (evt) => {
+        evt.stopPropagation();
+        this.openBook(book.user_book_id);
+      });
+      const author = book.author?.trim();
+      if (author) renderTextWithMarks(src.createSpan({ cls: "a4p-rw-bcard-author" }), author, this.terms);
+    }
+    const loc = locationLabel({ location: h.location, locationType: h.location_type });
+    if (loc) src.createSpan({ cls: "a4p-rw-bcard-loc", text: loc });
+    if ((h.note ?? "").trim()) badge(src, "message-square", "메모");
+    if (this.plugin.noteIndex.has(h.id)) badge(src, "file-check", "노트", "is-noted");
+    if (h.is_deleted) badge(src, "trash-2", "Readwise에서 삭제됨", "is-deleted");
+    for (const t of tagsOf(hit).slice(0, 3)) src.createSpan({ cls: "a4p-rw-bcard-tag", text: `#${t}` });
+    const when = formatRelative(highlightTime(h));
+    if (when) src.createSpan({ cls: "a4p-rw-bcard-time", text: when });
 
     const check = card.createSpan({ cls: "a4p-rw-bcard-check" });
     check.setAttr("aria-label", "여러 개 고르기");
@@ -751,36 +1103,6 @@ export class HighlightBrowserModal extends Modal {
       e.stopPropagation();
       this.toggleSelect(hit);
     });
-
-    const body = card.createDiv({ cls: "a4p-rw-bcard-body" });
-    const meta = body.createDiv({ cls: "a4p-rw-bcard-meta" });
-    renderTextWithMarks(meta.createSpan({ cls: "a4p-rw-bcard-title" }), book.title || "제목 없음", this.terms);
-    const author = book.author?.trim();
-    if (author) renderTextWithMarks(meta.createSpan({ cls: "a4p-rw-bcard-author" }), author, this.terms);
-    meta.createSpan({
-      cls: `a4p-rw-category-chip is-${book.category}`,
-      text: CATEGORY_LABELS[book.category] ?? book.category,
-    });
-    const loc = locationLabel({ location: h.location, locationType: h.location_type });
-    if (loc) meta.createSpan({ cls: "a4p-rw-bcard-loc", text: loc });
-    const when = formatRelative(highlightTime(h));
-    if (when) meta.createSpan({ cls: "a4p-rw-bcard-time", text: when });
-
-    renderTextWithMarks(
-      body.createDiv({ cls: "a4p-rw-bcard-text" }),
-      snippetAround(h.text ?? "", this.terms, 220),
-      this.terms,
-    );
-
-    const tags = tagsOf(hit);
-    const noted = this.plugin.noteIndex.has(h.id);
-    if ((h.note ?? "").trim() || noted || h.is_deleted || tags.length) {
-      const foot = body.createDiv({ cls: "a4p-rw-bcard-foot" });
-      if ((h.note ?? "").trim()) badge(foot, "message-square", "메모");
-      if (noted) badge(foot, "file-check", "노트 있음", "is-noted");
-      if (h.is_deleted) badge(foot, "trash-2", "Readwise에서 삭제됨", "is-deleted");
-      for (const t of tags.slice(0, 4)) foot.createSpan({ cls: "a4p-rw-bcard-tag", text: `#${t}` });
-    }
 
     card.addEventListener("click", () => {
       this.setCurrent(hit, false);
@@ -843,7 +1165,6 @@ export class HighlightBrowserModal extends Modal {
   private renderPreview() {
     const el = this.previewEl;
     el.empty();
-    for (const c of CATEGORY_ORDER) el.removeClass(`is-${c}`);
     const hit = this.current;
     if (!hit) {
       this.renderEmpty(el, "panel-right", "미리보기", "목록에서 밑줄을 고르면 전문·메모·앞뒤 맥락이 여기에 보입니다.");
@@ -851,7 +1172,6 @@ export class HighlightBrowserModal extends Modal {
     }
     const h = hit.highlight;
     const book = hit.book;
-    el.addClass(`is-${book.category}`);
 
     const back = el.createEl("button", { cls: "a4p-rw-b-ghost a4p-rw-b-back" });
     setIcon(back.createSpan(), "arrow-left");
@@ -859,99 +1179,151 @@ export class HighlightBrowserModal extends Modal {
     back.addEventListener("click", () => this.modalEl.removeClass("show-preview"));
 
     const head = el.createDiv({ cls: "a4p-rw-b-pv-head" });
-    head.createDiv({ cls: "a4p-rw-b-pv-title", text: book.title || "제목 없음" });
-    const sub = head.createDiv({ cls: "a4p-rw-b-pv-sub" });
-    if (book.author) sub.createSpan({ text: book.author });
-    sub.createSpan({
-      cls: `a4p-rw-category-chip is-${book.category}`,
-      text: CATEGORY_LABELS[book.category] ?? book.category,
-    });
+    renderCover(head, { title: book.title, category: book.category, sourceUrl: book.source_url }, "lg");
+    const headText = head.createDiv({ cls: "a4p-rw-b-pv-headtext" });
+    const titleEl = headText.createDiv({ cls: "a4p-rw-b-pv-title", text: book.title || "제목 없음" });
+    titleEl.setAttr("aria-label", "이 책의 밑줄을 읽은 순서대로 보기");
+    titleEl.addEventListener("click", () => this.openBook(book.user_book_id));
+    const sub = headText.createDiv({ cls: "a4p-rw-b-pv-sub" });
+    const subParts: string[] = [];
+    if (book.author?.trim()) subParts.push(book.author.trim());
+    subParts.push(CATEGORY_LABELS[book.category] ?? book.category);
     const loc = locationLabel({ location: h.location, locationType: h.location_type });
-    if (loc) sub.createSpan({ text: loc });
-    const date = highlightTime(h).slice(0, 10);
-    if (date) sub.createSpan({ text: `${date} 밑줄` });
-    const siblings = this.byBook.get(book.user_book_id) ?? [];
-    const pos = siblings.findIndex((x) => x.id === h.id);
-    if (pos >= 0) sub.createSpan({ text: `이 책 ${siblings.length}개 중 ${pos + 1}번째` });
-    if (h.is_deleted) sub.createSpan({ cls: "a4p-rw-deleted-chip", text: "Readwise에서 삭제됨" });
+    if (loc) subParts.push(loc);
+    const date = dayKey(highlightTime(h));
+    if (date) subParts.push(`${formatDayLabel(date)} 밑줄`);
+    sub.setText(subParts.join(" · "));
+    if (h.is_deleted) headText.createSpan({ cls: "a4p-rw-deleted-chip", text: "Readwise에서 삭제됨" });
 
     renderTextWithMarks(el.createDiv({ cls: "a4p-rw-b-pv-text" }), (h.text ?? "").trim(), this.terms);
 
     const note = (h.note ?? "").trim();
     if (note) {
       const box = el.createDiv({ cls: "a4p-rw-b-pv-note" });
-      box.createDiv({ cls: "a4p-rw-b-pv-label", text: "Readwise 메모" });
+      const label = box.createDiv({ cls: "a4p-rw-b-pv-label" });
+      setIcon(label.createSpan({ cls: "a4p-rw-b-pv-label-icon" }), "message-square");
+      label.createSpan({ text: "Readwise 메모" });
       renderTextWithMarks(box.createDiv(), note, this.terms);
     }
     const tags = tagsOf(hit);
     if (tags.length) {
-      const row = el.createDiv({ cls: "a4p-rw-bcard-foot" });
+      const row = el.createDiv({ cls: "a4p-rw-b-pv-tags" });
       for (const t of tags) row.createSpan({ cls: "a4p-rw-bcard-tag", text: `#${t}` });
     }
 
+    // 단추: 인용 넣기(주) · 형식 · 메모 노트/복사/Readwise(아이콘)
     const actions = el.createDiv({ cls: "a4p-rw-b-pv-actions" });
     const insert = actions.createEl("button", { cls: "a4p-rw-b-cta" });
     setIcon(insert.createSpan(), "quote");
     insert.createSpan({ text: "인용 넣기" });
+    insert.createEl("kbd", { text: "↵" });
     insert.addEventListener("click", () => this.insertHits([hit]));
-    const fmt = actions.createEl("select", { cls: "dropdown a4p-rw-b-fmt" });
-    for (const [value, label] of Object.entries(CITATION_FORMAT_LABELS)) {
-      fmt.createEl("option", { value, text: label.replace(/ — .*/, "") });
-    }
-    fmt.value = this.plugin.settings.citationFormat;
-    fmt.setAttr("aria-label", "인용 형식 — 바꾸면 설정에도 저장됩니다");
+
+    const icons = actions.createDiv({ cls: "a4p-rw-b-pv-icons" });
     const noted = this.plugin.noteIndex.has(h.id);
-    const memo = actions.createEl("button", { cls: "a4p-rw-b-ghost" });
-    setIcon(memo.createSpan(), noted ? "file-check" : "file-plus");
-    memo.createSpan({ text: noted ? "노트 열기" : "메모 노트" });
+    const memo = icons.createEl("button", { cls: "a4p-rw-b-iconbtn" });
+    setIcon(memo, noted ? "file-check" : "file-plus");
+    memo.toggleClass("is-existing", noted);
+    memo.setAttr("aria-label", noted ? "노트 열기 — 이 밑줄의 메모 노트가 있습니다" : "메모 노트 만들기 (Shift+Enter)");
     memo.addEventListener("click", () => this.openMemo(hit));
-    const copy = actions.createEl("button", { cls: "a4p-rw-b-ghost" });
-    setIcon(copy.createSpan(), "copy");
-    copy.createSpan({ text: "복사" });
+    const copy = icons.createEl("button", { cls: "a4p-rw-b-iconbtn" });
+    setIcon(copy, "copy");
+    copy.setAttr("aria-label", "인용을 클립보드에 복사");
     copy.addEventListener("click", () => void this.copy(hit));
     const url = h.readwise_url || book.readwise_url;
     if (url) {
-      const link = actions.createEl("a", { cls: "a4p-rw-b-ghost", href: url });
-      setIcon(link.createSpan(), "external-link");
-      link.createSpan({ text: "Readwise" });
+      const link = icons.createEl("a", { cls: "a4p-rw-b-iconbtn", href: url });
+      setIcon(link, "external-link");
       link.setAttr("target", "_blank");
       link.setAttr("rel", "noopener");
+      link.setAttr("aria-label", "Readwise에서 보기");
     }
 
+    // 넣을 모양 — 노트에 들어갈 실제 모습 (기호 보기로 마크다운 원문)
     const outSec = el.createDiv({ cls: "a4p-rw-b-pv-sec" });
-    outSec.createDiv({ cls: "a4p-rw-b-pv-label", text: "넣을 모양" });
-    const out = outSec.createEl("pre", { cls: "a4p-rw-b-pv-out" });
-    out.setText(formatHitCitation(hit, citationOptions(this.plugin.settings)));
-    fmt.addEventListener("change", async () => {
-      this.plugin.settings.citationFormat = fmt.value as CitationFormat;
-      await this.plugin.persist();
-      out.setText(formatHitCitation(hit, citationOptions(this.plugin.settings)));
+    const outLabel = outSec.createDiv({ cls: "a4p-rw-b-pv-label" });
+    outLabel.createSpan({ text: "넣을 모양" });
+    const rawBtn = outLabel.createEl("button", { cls: "a4p-rw-b-reset a4p-rw-b-raw-toggle" });
+    const fmt = outSec.createDiv({ cls: "a4p-rw-b-fmt" });
+    fmt.setAttr("aria-label", "인용 형식 — 바꾸면 설정에도 저장됩니다");
+    const out = outSec.createDiv({ cls: "a4p-rw-b-pv-out" });
+    const renderOut = () => {
+      rawBtn.setText(this.showRaw ? "실제 모습 보기" : "기호 보기");
+      this.renderCitationPreview(out, formatHitCitation(hit, citationOptions(this.plugin.settings)));
+    };
+    rawBtn.addEventListener("click", () => {
+      this.showRaw = !this.showRaw;
+      renderOut();
+      this.focusInput();
     });
+    const renderFormats = () => {
+      fmt.empty();
+      for (const [value, label, tip] of FORMATS) {
+        const btn = fmt.createEl("button", { text: label });
+        btn.setAttr("aria-label", tip);
+        if (this.plugin.settings.citationFormat === value) btn.addClass("is-on");
+        btn.addEventListener("click", async () => {
+          this.plugin.settings.citationFormat = value;
+          await this.plugin.persist();
+          renderFormats();
+          renderOut();
+          this.focusInput();
+        });
+      }
+    };
+    renderFormats();
+    renderOut();
 
+    const siblings = this.byBook.get(book.user_book_id) ?? [];
+    const pos = siblings.findIndex((x) => x.id === h.id);
     if (pos >= 0 && siblings.length > 1) {
       const ctx = el.createDiv({ cls: "a4p-rw-b-pv-sec" });
-      const label = ctx.createDiv({ cls: "a4p-rw-b-pv-label" });
-      setIcon(label.createSpan({ cls: "a4p-rw-b-pv-label-icon" }), "layers");
-      label.createSpan({ text: "같은 책의 앞뒤 밑줄" });
-      for (const sib of siblings.slice(Math.max(0, pos - 2), pos + 3)) {
-        const item = ctx.createDiv({ cls: "a4p-rw-b-ctx" });
+      ctx.createDiv({
+        cls: "a4p-rw-b-pv-label",
+        text: `이 책의 앞뒤 밑줄 · ${siblings.length}개 중 ${pos + 1}번째`,
+      });
+      const line = ctx.createDiv({ cls: "a4p-rw-b-tl" });
+      const start = Math.max(0, pos - 2);
+      siblings.slice(start, pos + 3).forEach((sib, i) => {
+        const item = line.createDiv({ cls: "a4p-rw-b-ctx" });
         if (sib.id === h.id) item.addClass("is-me");
-        item.createSpan({ cls: "a4p-rw-b-ctx-num", text: String(siblings.indexOf(sib) + 1) });
-        item.appendText((sib.text ?? "").replace(/\s+/g, " ").trim());
+        item.createSpan({ cls: "a4p-rw-b-ctx-num", text: String(start + i + 1) });
+        item.createSpan({ cls: "a4p-rw-b-ctx-text", text: (sib.text ?? "").replace(/\s+/g, " ").trim() });
         if (sib.id !== h.id) {
           item.addEventListener("click", () => {
             const inList = this.list.find((x) => x.highlight.id === sib.id);
             this.setCurrent(inList ?? { highlight: sib, book, score: 0 }, true);
           });
         }
-      }
+      });
     }
+  }
+
+  /** 인용을 노트에 들어갈 모습 그대로 그린다 (showRaw면 마크다운 기호 그대로) */
+  private renderCitationPreview(out: HTMLElement, markdown: string) {
+    out.empty();
+    out.toggleClass("is-raw", this.showRaw);
+    this.previewRenderer?.unload();
+    this.previewRenderer = null;
+    if (this.showRaw) {
+      out.createEl("pre", { text: markdown });
+      return;
+    }
+    const renderer = new Component();
+    renderer.load();
+    this.previewRenderer = renderer;
+    const box = out.createDiv({ cls: "markdown-rendered a4p-rw-b-rendered" });
+    void MarkdownRenderer.render(this.app, markdown, box, "", renderer).catch(() => {
+      // 그리지 못하면 기호 그대로라도 보인다
+      box.empty();
+      box.createEl("pre", { text: markdown });
+    });
   }
 
   // ───────── 동작 ─────────
 
   private registerKeys() {
-    // 책 찾기 칸·형식 선택 같은 다른 입력칸에서는 키를 그 칸에 맡긴다
+    // 책 찾기 칸 같은 다른 입력칸에서는 키를 그 칸에 맡긴다
     const typingElsewhere = () => {
       const a = document.activeElement;
       return (
@@ -1040,7 +1412,7 @@ export class HighlightBrowserModal extends Modal {
     }
   }
 
-  private async runSync(btn: HTMLButtonElement) {
+  private async runSync(btn: HTMLButtonElement, label: HTMLElement) {
     if (this.plugin.sync.isRunning()) return;
     btn.setAttr("disabled", "true");
     btn.addClass("is-syncing");
@@ -1050,8 +1422,9 @@ export class HighlightBrowserModal extends Modal {
       btn.removeAttribute("disabled");
       btn.removeClass("is-syncing");
     }
-    this.byBook.clear();
+    label.setText(this.syncLabel());
     this.indexBooks();
+    this.renderCount();
     this.refresh();
     this.plugin.notifyViews();
   }

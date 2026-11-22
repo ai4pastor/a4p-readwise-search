@@ -112,7 +112,7 @@ function truncateFileName(s: string, maxChars: number, maxNfdBytes: number): str
   return out.replace(/^\.+/, "").replace(/[\s.,]+$/g, "");
 }
 
-function sanitizeSegment(s: string, maxChars: number, maxNfdBytes: number): string {
+export function sanitizeSegment(s: string, maxChars: number, maxNfdBytes: number): string {
   const cleaned = s
     .replace(/[\\/:*?"<>|#^[\]]/g, (c) => CHAR_MAP[c] ?? " ")
     .replace(/\s+/g, " ")
@@ -196,14 +196,14 @@ function buildContent(n: NormalizedHighlight): string {
   return fmLines.join("\n") + "\n\n" + body.join("\n") + "\n";
 }
 
-function yamlString(s: string): string {
+export function yamlString(s: string): string {
   if (/[:#\-?&*,\[\]{}|>!%@`'"\n]/.test(s) || /^\s|\s$/.test(s)) {
     return `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
   }
   return s;
 }
 
-async function ensureFolder(app: App, folderPath: string): Promise<void> {
+export async function ensureFolder(app: App, folderPath: string): Promise<void> {
   const segments = folderPath.split("/").filter(Boolean);
   let cur = "";
   for (const seg of segments) {

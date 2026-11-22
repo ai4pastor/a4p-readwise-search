@@ -200,7 +200,7 @@ export function stripKoreanEnding(word: string): string {
 }
 
 /** 일부 일치 단계에서 버리는 흔한 낱말 (조사를 뗀 뒤 기준) */
-const PARTIAL_STOPWORDS = new Set([
+export const PARTIAL_STOPWORDS = new Set([
   "않는", "않은", "않고", "있는", "있다", "없는", "없다", "같은", "것처럼", "것은", "것이", "것을",
   "때문", "위해", "위해서", "통해", "통해서", "대한", "대해", "어떻게", "무엇", "그리고", "하지만",
   "그러나", "정말", "너무", "어떤", "모든", "우리", "나의", "내가", "당신", "그것", "이것", "여기",
