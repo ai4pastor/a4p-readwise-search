@@ -20,8 +20,8 @@
 ## 설치 (BRAT 사용)
 
 1. 옵시디언 커뮤니티 플러그인에서 **BRAT** 검색 → 설치 → 활성화
-2. Cmd/Ctrl+P → "BRAT: Add a beta plugin for testing" 실행
-3. 입력창에 `ai4pastor/a4p-readwise-search` 입력 → 추가
+2. Cmd/Ctrl+P → "BRAT: Plugins: Add a beta plugin for testing (with or without version)" 실행 (BRAT 설정 탭의 **Add beta plugin** 단추도 같은 창을 엽니다)
+3. 입력창에 `ai4pastor/a4p-readwise-search` 입력 → **Enable after installing the plugin** 체크 → **Add plugin**
 4. 옵시디언 설정 → 커뮤니티 플러그인에서 **A4P Readwise Search** 활성화
 
 ## 사용법
